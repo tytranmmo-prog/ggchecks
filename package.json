@@ -1,20 +1,33 @@
 {
   "name": "ggchecks",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
   "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "check": "node checker.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "check:one": "node checkOne.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "@otplib/preset-browser": "^12.0.1",
-    "dotenv": "^17.3.1",
+    "google-auth-library": "^10.6.2",
+    "google-spreadsheet": "^5.2.0",
+    "googleapis": "^171.4.0",
+    "next": "16.2.1",
     "otplib": "^13.4.0",
-    "playwright": "^1.58.2"
-  }
+    "playwright": "^1.58.2",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "babel-plugin-react-compiler": "1.0.0",
+    "typescript": "^5"
+  },
+  "trustedDependencies": [
+    "sharp",
+    "unrs-resolver"
+  ]
 }
