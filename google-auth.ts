@@ -102,7 +102,12 @@ export async function fillAndSubmitTOTP(
   await inputEl.fill(code);
   await sleep(300);
   await page.keyboard.press('Enter');
-  await sleep(3000);
+
+  // Wait for Google to redirect away from the challenge page (up to 15s)
+  // A hard sleep isn't reliable — slow connections need more time
+  await page
+    .waitForURL(url => !url.href.includes('accounts.google.com'), { timeout: 15_000 })
+    .catch(() => sleep(3000)); // fall back to 3s sleep if no redirect detected
 }
 
 // ──────────────────────────────────────────────
@@ -142,6 +147,14 @@ export async function googleLogin(
   if (isTotpPrompt) {
     log('TOTP prompt detected (login)...');
     await fillAndSubmitTOTP(page, totpSecret, 'login');
+    // fillAndSubmitTOTP already waits for the redirect;
+    // give an extra moment for any post-redirect animations
+    await sleep(1000);
+  } else {
+    // No TOTP — but password submission might still be redirecting
+    await page
+      .waitForURL(url => !url.href.includes('accounts.google.com'), { timeout: 10_000 })
+      .catch(() => {}); // ignore timeout — URL check below will catch failures
   }
 
   const finalUrl = page.url();

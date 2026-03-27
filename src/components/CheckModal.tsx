@@ -45,6 +45,7 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const startedRef = useRef(false); // prevents StrictMode double-invoke
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -117,8 +118,12 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
     }
   };
 
-  // Auto-start on mount
-  useEffect(() => { startCheck(); }, []); // eslint-disable-line
+  // Auto-start on mount — guard against React StrictMode double-invoke
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    startCheck();
+  }, []); // eslint-disable-line
 
   return (
     <div className="modal-overlay" onClick={(e) => !running && e.target === e.currentTarget && onClose()}>
