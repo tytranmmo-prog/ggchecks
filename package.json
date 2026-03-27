@@ -6,8 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "check": "node checker.js",
-    "check:one": "node checkOne.js"
+    "check:one": "bun checkOne.ts",
+    "change2fa": "bun change2fa.ts"
   },
   "dependencies": {
     "google-auth-library": "^10.6.2",

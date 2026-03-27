@@ -19,13 +19,13 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
       const cwd = process.cwd();
-      const scriptPath = process.env.CHANGE2FA_PATH ?? `${cwd}/change2fa.js`;
+      const scriptPath = process.env.CHANGE2FA_PATH ?? `${cwd}/change2fa.ts`;
       const accountData = { email, password, totpSecret };
 
       const { exec } = await import('child_process' as string);
 
       const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
-      const cmd = `node "${scriptPath}"`;
+      const cmd = `bun "${scriptPath}"`;
 
       send({ type: 'log', message: `🔐 Starting 2FA rotation for ${email}...` });
 

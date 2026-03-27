@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       // checkOne.js is at the project root
       const cwd = process.cwd();
-      const scriptPath = process.env.CHECKER_PATH ?? `${cwd}/checkOne.js`;
+      const scriptPath = process.env.CHECKER_PATH ?? `${cwd}/checkOne.ts`;
       const accountData = { email, password, totpSecret };
 
       // Use exec (shell string) so Turbopack doesn't analyze args as module paths
@@ -26,9 +26,7 @@ export async function POST(req: NextRequest) {
       // Safely pass account JSON via environment variable to avoid shell injection
       const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
 
-      // The script reads from ACCOUNT_JSON env var; pass a placeholder arg for compat
-      // Actually we pass it as a base64 env var and update checkOne.js to support it
-      const cmd = `node "${scriptPath}" "$ACCOUNT_JSON"`;
+      const cmd = `bun "${scriptPath}"`;
 
       const child = exec(cmd, { env: env as NodeJS.ProcessEnv, maxBuffer: 10 * 1024 * 1024 });
 
