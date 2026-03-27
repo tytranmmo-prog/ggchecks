@@ -61,6 +61,38 @@ export async function createBrowser(): Promise<BrowserSession> {
   return { browser, context, page };
 }
 
+/**
+ * Connect to an already-running Chrome instance via CDP.
+ * Calling browser.close() only disconnects — it does NOT kill Chrome.
+ */
+export async function createBrowserCDP(port = 9222): Promise<BrowserSession> {
+  log(`Connecting to Chrome via CDP on port ${port}...`);
+  const browser = await chromium.connectOverCDP(`http://localhost:${port}`);
+  const context = browser.contexts()[0];
+  if (!context) throw new Error(`No browser context found on port ${port}`);
+  const page = context.pages()[0] ?? await context.newPage();
+  log(`CDP connected. Current URL: ${page.url()}`);
+  return { browser, context, page };
+}
+
+/**
+ * Connect via CDP and create a NEW isolated (incognito-like) context.
+ * Use for bulk checking — each account gets a fresh session with no cookie bleed.
+ * Caller MUST call context.close() when done.
+ */
+export async function createBrowserCDPFresh(port = 9222): Promise<BrowserSession> {
+  log(`CDP fresh context on port ${port}...`);
+  const browser = await chromium.connectOverCDP(`http://localhost:${port}`);
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    viewport: { width: 1280, height: 800 },
+    locale: 'en-US',
+  });
+  const page = await context.newPage();
+  log('CDP fresh context ready.');
+  return { browser, context, page };
+}
+
 // ──────────────────────────────────────────────
 // TOTP input helper
 // Finds the code input, fills it, and submits
@@ -157,11 +189,55 @@ export async function googleLogin(
       .catch(() => {}); // ignore timeout — URL check below will catch failures
   }
 
+  // Dismiss passkey suggestion if it appears ("Simplify your sign-in")
+  await dismissPasskeyPrompt(page);
+
   const finalUrl = page.url();
   if (finalUrl.includes('accounts.google.com')) {
     throw new Error(`Login did not complete — still on: ${finalUrl}`);
   }
   log('Login successful.');
+}
+
+// ──────────────────────────────────────────────
+// Passkey prompt dismissal
+// Google shows "Simplify your sign-in" after login
+// offering to create a passkey. Click "Not now".
+// ──────────────────────────────────────────────
+
+async function dismissPasskeyPrompt(page: Page): Promise<void> {
+  try {
+    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
+    const isPasskeyPrompt =
+      bodyText.includes('Simplify your sign-in') ||
+      bodyText.includes('create a passkey') ||
+      bodyText.includes('passkey');
+
+    if (!isPasskeyPrompt) return;
+
+    log('Passkey prompt detected — dismissing...');
+
+    // Try clicking "Not now" button
+    const dismissed = await page.evaluate(() => {
+      var buttons = Array.from(document.querySelectorAll('button'));
+      var notNow = buttons.find(function(b) {
+        return /not now/i.test(b.innerText);
+      });
+      if (notNow) { notNow.click(); return true; }
+      return false;
+    });
+
+    if (dismissed) {
+      log('Passkey prompt dismissed.');
+      await sleep(1500);
+      // After dismissal, wait for redirect off accounts.google.com
+      await page
+        .waitForURL(url => !url.href.includes('accounts.google.com'), { timeout: 8_000 })
+        .catch(() => {});
+    }
+  } catch {
+    // Non-fatal — if dismissal fails, the outer URL check will catch it
+  }
 }
 
 // ──────────────────────────────────────────────

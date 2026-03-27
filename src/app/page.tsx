@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import CheckModal from '@/components/CheckModal';
 import Change2FAModal from '@/components/Change2FAModal';
 import AddAccountModal from '@/components/AddAccountModal';
+import BulkCheckModal from '@/components/BulkCheckModal';
 
 interface Account {
   rowIndex: number;
@@ -34,6 +35,7 @@ export default function HomePage() {
   const [checkTarget, setCheckTarget] = useState<Account | null>(null);
   const [twoFATarget, setTwoFATarget] = useState<Account | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showBulkCheck, setShowBulkCheck] = useState(false);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -127,6 +129,14 @@ export default function HomePage() {
           >
             <span className={refreshing ? 'spinning' : ''}>↻</span>
             {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button
+            className="btn btn-success"
+            onClick={() => setShowBulkCheck(true)}
+            disabled={accounts.length === 0}
+            title="Check all accounts simultaneously"
+          >
+            ⚡ Check All ({accounts.length})
           </button>
           <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
             ➕ Add Account
@@ -292,6 +302,14 @@ export default function HomePage() {
         <AddAccountModal
           onClose={() => setShowAddModal(false)}
           onSaved={() => fetchAccounts(true)}
+        />
+      )}
+
+      {showBulkCheck && accounts.length > 0 && (
+        <BulkCheckModal
+          accounts={accounts}
+          onClose={() => setShowBulkCheck(false)}
+          onDone={() => fetchAccounts(true)}
         />
       )}
 

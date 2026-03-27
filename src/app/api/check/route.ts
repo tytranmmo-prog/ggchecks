@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, rowIndex } = body;
+  const { email, password, totpSecret, rowIndex, debugPort } = body;
 
   if (!email || !password || !totpSecret || !rowIndex) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
@@ -15,10 +15,12 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      // checkOne.js is at the project root
       const cwd = process.cwd();
       const scriptPath = process.env.CHECKER_PATH ?? `${cwd}/checkOne.ts`;
-      const accountData = { email, password, totpSecret };
+
+      // Stealth mode: include debugPort so checkOne.ts uses connectOverCDP
+      const accountData: Record<string, unknown> = { email, password, totpSecret };
+      if (debugPort) accountData.debugPort = Number(debugPort);
 
       // Use exec (shell string) so Turbopack doesn't analyze args as module paths
       const { exec } = await import('child_process' as string);
@@ -26,7 +28,10 @@ export async function POST(req: NextRequest) {
       // Safely pass account JSON via environment variable to avoid shell injection
       const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
 
-      const cmd = `bun "${scriptPath}"`;
+      // Stealth mode needs npx tsx (Node) — connectOverCDP doesn't work in Bun's WS impl
+      const cmd = debugPort
+        ? `npx tsx "${scriptPath}"`
+        : `bun "${scriptPath}"`;
 
       const child = exec(cmd, { env: env as NodeJS.ProcessEnv, maxBuffer: 10 * 1024 * 1024 });
 
