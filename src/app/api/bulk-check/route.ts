@@ -1,8 +1,12 @@
+import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
 import { updateCreditResult } from '@/lib/sheets';
-import { ensureChrome, waitForSlot, CONCURRENCY } from '@/lib/chrome-pool';
+import { getPool, type PoolType } from '@/lib/browser-pool';
 
 export const runtime = 'nodejs';
+
+const log = (...args: unknown[]) =>
+  console.log(`[bulk-check ${new Date().toISOString()}]`, ...args);
 
 interface AccountInput {
   rowIndex: number;
@@ -11,90 +15,144 @@ interface AccountInput {
   totpSecret: string;
 }
 
-function runCheck(account: AccountInput, debugPort: number, scriptPath: string): Promise<string> {
+// ── runCheck ──────────────────────────────────────────────────────────────────
+// Uses a static `exec` import (no dynamic import hack) to avoid silent hangs.
+
+function runCheck(
+  account: AccountInput,
+  debugPort: number,
+  scriptPath: string,
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    // No freshContext — persistent Chrome profile caches the session
     const accountData = { ...account, debugPort };
     const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
-    import('child_process' as string).then(({ exec }: { exec: Function }) => {
-      exec(`npx tsx "${scriptPath}"`,
-        { env, timeout: 120_000, maxBuffer: 5 * 1024 * 1024 },
-        (err: Error | null, stdout: string, stderr: string) => {
-          if (err && !stdout?.trim()) reject(new Error(stderr?.trim() || err.message || 'Process failed'));
-          else resolve(stdout || '');
+
+    log(`[${account.email}] spawning checker on port ${debugPort}`);
+
+    const child = exec(
+      `npx tsx "${scriptPath}"`,
+      { env, timeout: 120_000, maxBuffer: 5 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err && !stdout?.trim()) {
+          log(`[${account.email}] checker error:`, stderr?.trim() || err.message);
+          reject(new Error(stderr?.trim() || err.message || 'Process failed'));
+        } else {
+          log(`[${account.email}] checker stdout (${stdout?.length ?? 0} bytes)`);
+          resolve(stdout || '');
         }
-      );
-    });
+      },
+    );
+
+    child.on('exit', (code, signal) =>
+      log(`[${account.email}] checker exited code=${code} signal=${signal}`),
+    );
   });
 }
+
+// ── POST ──────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const accounts: AccountInput[] = body.accounts;
+  const poolType: PoolType =
+    body.poolType === 'persistent' ? 'persistent' : 'ephemeral';
+
+  log(`request: ${accounts?.length ?? 0} accounts, pool=${poolType}`);
+
   if (!accounts?.length) {
     return new Response(JSON.stringify({ error: 'No accounts' }), { status: 400 });
   }
 
-  const encoder = new TextEncoder();
+  const encoder   = new TextEncoder();
   const scriptPath = process.env.CHECKER_PATH ?? `${process.cwd()}/checkOne.ts`;
+
+  log(`using scriptPath=${scriptPath}`);
+
+  const pool = await getPool(poolType);
+  log(`pool ready: type=${pool.type} concurrency=${pool.concurrency}`);
 
   const stream = new ReadableStream({
     async start(controller) {
       const send = (data: object) => {
         try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); }
-        catch { /* stream closed */ }
+        catch { /* stream closed (client disconnected) */ }
       };
 
-      send({ type: 'start', total: accounts.length, concurrency: CONCURRENCY });
+      send({ type: 'start', total: accounts.length, concurrency: pool.concurrency, poolType });
 
       let completed = 0;
-      let errors = 0;
+      let errors    = 0;
 
       const tasks = accounts.map(async (account) => {
-        // Claim a Chrome slot — each slot is a separate persistent Chrome instance
-        const { port, release } = await waitForSlot();
-        send({ type: 'account_start', rowIndex: account.rowIndex, email: account.email, port });
+        log(`[${account.email}] waiting for pool slot…`);
+
+        let release: (() => Promise<void>) | undefined;
+        let port: number | undefined;
 
         try {
-          // Auto-launch Chrome on this slot's port if not already running
-          await ensureChrome(port);
+          // acquire() itself may throw (e.g. Chrome failed to start).
+          // We wrap it here so the semaphore is always released even on startup failure.
+          ({ port, release } = await pool.acquire(account.email));
+          log(`[${account.email}] acquired port=${port}`);
+          send({ type: 'account_start', rowIndex: account.rowIndex, email: account.email, port });
           send({ type: 'chrome_ready', port });
 
           const stdout = await runCheck(account, port, scriptPath);
-          const result = JSON.parse(stdout.trim());
+
+          let result: Record<string, unknown>;
+          try {
+            result = JSON.parse(stdout.trim());
+          } catch {
+            throw new Error(`Non-JSON output from checker:\n${stdout.slice(0, 300)}`);
+          }
 
           if (result.success) {
-            const memberText = (result.memberActivities || [])
-              .map((m: { name: string; credit: number }) => `${m.name}: ${m.credit}`)
+            const memberText = ((result.memberActivities ?? []) as { name: string; credit: number }[])
+              .map(m => `${m.name}: ${m.credit}`)
               .join(' | ');
+
             await updateCreditResult(account.rowIndex, {
-              monthlyCredits: result.monthlyCredits || '',
-              additionalCredits: result.additionalCredits || '',
-              additionalCreditsExpiry: result.additionalCreditsExpiry || '',
-              memberActivities: memberText,
-              lastChecked: result.checkAt || new Date().toISOString(),
-              status: 'ok',
-            }).catch(() => {});
+              monthlyCredits:          String(result.monthlyCredits          ?? ''),
+              additionalCredits:       String(result.additionalCredits       ?? ''),
+              additionalCreditsExpiry: String(result.additionalCreditsExpiry ?? ''),
+              memberActivities:        memberText,
+              lastChecked:             String(result.checkAt                 ?? new Date().toISOString()),
+              status:                  'ok',
+            }).catch(e => log(`[${account.email}] sheets update failed:`, e));
+
             send({ type: 'account_done', rowIndex: account.rowIndex, result });
+            log(`[${account.email}] done ✓`);
             completed++;
           } else {
-            throw new Error(result.error || 'Unknown error');
+            throw new Error(String(result.error) || 'Unknown error from checker');
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
+          log(`[${account.email}] ERROR:`, msg);
           send({ type: 'account_error', rowIndex: account.rowIndex, error: msg });
+
           await updateCreditResult(account.rowIndex, {
             monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
             memberActivities: '', lastChecked: new Date().toISOString(),
             status: `error: ${msg.slice(0, 100)}`,
-          }).catch(() => {});
+          }).catch(e => log(`[${account.email}] sheets error update failed:`, e));
+
           errors++;
         } finally {
-          release();
+          // CRITICAL: always release — even if acquire() itself threw.
+          // release is only defined if acquire() succeeded, in which case
+          // the semaphore was already incremented and MUST be decremented.
+          if (release) {
+            log(`[${account.email}] releasing port=${port}`);
+            await release().catch(e => log(`[${account.email}] release error:`, e));
+          }
         }
       });
 
+      log(`all ${tasks.length} tasks launched, awaiting…`);
       await Promise.all(tasks);
+      log(`all tasks done: completed=${completed} errors=${errors}`);
+
       send({ type: 'done', completed, errors });
       controller.close();
     },
@@ -102,9 +160,9 @@ export async function POST(req: NextRequest) {
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
+      'Content-Type':  'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      'Connection':    'keep-alive',
     },
   });
 }

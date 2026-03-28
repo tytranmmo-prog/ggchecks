@@ -1,15 +1,25 @@
-import { spawn } from 'child_process';
-import { join } from 'path';
+/**
+ * chrome-pool.ts  —  PersistentChromePool
+ *
+ * Implements BrowserPool using long-lived Chrome instances.
+ * Each of the N slots has its own permanent profile directory and stays
+ * running between checks. Fast second-check startup, but profile state
+ * accumulates over time.
+ *
+ * Implements: BrowserPool (browser-pool.ts)
+ */
+
+import { spawn }        from 'child_process';
+import { join }         from 'path';
+import type { BrowserHandle, BrowserPool, PoolType } from './browser-pool';
+
+// ─── Configuration ────────────────────────────────────────────────────────────
 
 export const CONCURRENCY = parseInt(process.env.BULK_CONCURRENCY || '10', 10);
 export const BASE_PORT   = parseInt(process.env.BULK_BASE_PORT   || '9300', 10);
 export const PROFILE_DIR = process.env.BULK_PROFILE_DIR || '/tmp/ggchecks-profiles';
 
-// One Chrome per slot, each with its own persistent profile
-const slotAvailable: Record<number, boolean> = {};
-for (let i = 0; i < CONCURRENCY; i++) {
-  slotAvailable[BASE_PORT + i] = true;
-}
+// ─── Helpers (still exported for direct use / tests) ────────────────────────
 
 export function getChromePath(): string {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
@@ -30,19 +40,15 @@ export async function ensureChrome(port: number): Promise<void> {
   } catch { /* not up yet */ }
 
   const profileDir = `${PROFILE_DIR}/slot-${port}`;
-  // The first slot has port === BASE_PORT, so portIndex is 0
-  const portIndex = port - BASE_PORT;
-  
-  // Choose an upstream proxy port (8001 - 8099)
-  const proxyPort = 8001 + (portIndex % 99);
-  // Spawn a local unauthenticated proxy (on 10000 + proxyPort) to forward traffic via proxy-chain
+  const portIndex  = port - BASE_PORT;
+
+  const proxyPort      = 8001 + (portIndex % 99);
   const localProxyPort = 10000 + proxyPort;
 
-  // Make sure to spawn the helper completely detached so it survives
   const proxyHelper = join(process.cwd(), 'src', 'lib', 'run-proxy.js');
   const proxyChild = spawn('node', [proxyHelper, localProxyPort.toString(), proxyPort.toString()], {
     detached: true,
-    stdio: 'ignore',
+    stdio:    'ignore',
     env: {
       ...process.env,
       OXYLABS_PROXY_HOST: process.env.OXYLABS_PROXY_HOST ?? 'isp.oxylabs.io',
@@ -52,7 +58,6 @@ export async function ensureChrome(port: number): Promise<void> {
   });
   proxyChild.unref();
 
-  // Give local proxy-chain a second to bind
   await new Promise(r => setTimeout(r, 1000));
 
   const child = spawn(getChromePath(), [
@@ -80,20 +85,41 @@ export async function ensureChrome(port: number): Promise<void> {
   throw new Error(`Chrome on port ${port} did not start within 15 s`);
 }
 
-/** Claim a free slot. Resolves when a slot is available. */
-export async function waitForSlot(): Promise<{ port: number; release: () => void }> {
-  return new Promise(resolve => {
-    const poll = () => {
-      const port = (Object.keys(slotAvailable) as unknown as number[])
-        .map(Number)
-        .find(p => slotAvailable[p]);
-      if (port !== undefined) {
-        slotAvailable[port] = false;
-        resolve({ port, release: () => { slotAvailable[port] = true; } });
-      } else {
-        setTimeout(poll, 200);
-      }
-    };
-    poll();
-  });
+// ─── BrowserPool implementation ───────────────────────────────────────────────
+
+export class PersistentChromePool implements BrowserPool {
+  readonly type: PoolType = 'persistent';
+  readonly concurrency = CONCURRENCY;
+
+  // Slot availability map: port → free?
+  private readonly slots: Record<number, boolean> = {};
+
+  constructor() {
+    for (let i = 0; i < CONCURRENCY; i++) {
+      this.slots[BASE_PORT + i] = true;
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  acquire(_email: string): Promise<BrowserHandle> {
+    return new Promise(resolve => {
+      const poll = async () => {
+        const port = Object.keys(this.slots)
+          .map(Number)
+          .find(p => this.slots[p]);
+
+        if (port !== undefined) {
+          this.slots[port] = false;
+          await ensureChrome(port);
+          resolve({
+            port,
+            release: async () => { this.slots[port] = true; },
+          });
+        } else {
+          setTimeout(poll, 200);
+        }
+      };
+      poll();
+    });
+  }
 }
