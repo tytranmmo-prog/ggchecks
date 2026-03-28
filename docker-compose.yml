@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  ggchecks:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      # Inject credentials via Compose environment file mapping below
+      - GOOGLE_SERVICE_ACCOUNT_EMAIL=${GOOGLE_SERVICE_ACCOUNT_EMAIL}
+      - GOOGLE_PRIVATE_KEY=${GOOGLE_PRIVATE_KEY}
+      - GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
+      - PROXY_USERNAME=${PROXY_USERNAME}
+      - PROXY_PASSWORD=${PROXY_PASSWORD}
+      - DRIVE_SCREENSHOT_FOLDER_ID=${DRIVE_SCREENSHOT_FOLDER_ID:-}
+    env_file:
+      - .env.local
+    volumes:
+      # Map the screenshots directory so they aren't lost on container rebuild
+      - ./tmp_screenshots:/tmp/ggchecks-screenshots
+    restart: unless-stopped
