@@ -2,6 +2,7 @@ import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
 import { updateCreditResult, uploadScreenshotToDrive, updateErrorScreenshot } from '@/lib/sheets';
 import { getPool, type PoolType } from '@/lib/browser-pool';
+import { getAllConfigs } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -25,7 +26,7 @@ function runCheck(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const accountData = { ...account, debugPort };
-    const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
+    const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
 
     log(`[${account.email}] spawning checker on port ${debugPort}`);
 

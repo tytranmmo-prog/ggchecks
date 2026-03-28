@@ -5,6 +5,7 @@ import CheckModal from '@/components/CheckModal';
 import Change2FAModal from '@/components/Change2FAModal';
 import AddAccountModal from '@/components/AddAccountModal';
 import BulkCheckModal from '@/components/BulkCheckModal';
+import SettingsModal from '@/components/SettingsModal';
 
 interface Account {
   rowIndex: number;
@@ -36,6 +37,7 @@ export default function HomePage() {
   const [twoFATarget, setTwoFATarget] = useState<Account | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkCheck, setShowBulkCheck] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -129,6 +131,9 @@ export default function HomePage() {
           >
             <span className={refreshing ? 'spinning' : ''}>↻</span>
             {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button className="btn btn-secondary" onClick={() => setShowSettings(true)} title="Configuration Settings">
+            ⚙️ Settings
           </button>
           <button
             className="btn btn-success"
@@ -322,6 +327,13 @@ export default function HomePage() {
           accounts={accounts}
           onClose={() => setShowBulkCheck(false)}
           onDone={() => fetchAccounts(true)}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          showToast={showToast}
         />
       )}
 

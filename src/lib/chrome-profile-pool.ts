@@ -24,15 +24,8 @@ import { join }                from 'path';
 import { mkdir }               from 'fs/promises';
 import type { BrowserHandle, BrowserPool, PoolType } from './browser-pool';
 
-// ─── Configuration ────────────────────────────────────────────────────────────
-
-export const CONCURRENCY     = parseInt(process.env.BULK_CONCURRENCY      || '10',    10);
-export const BASE_CDP_PORT   = parseInt(process.env.BULK_BASE_PORT         || '9300',  10);
-export const BASE_PROXY_PORT = parseInt(process.env.BULK_BASE_PROXY_PORT   || '10100', 10);
-export const PROFILE_BASE    = process.env.BULK_PROFILE_DIR || '/tmp/ggchecks-profiles';
-
-const UPSTREAM_PROXY_BASE  = parseInt(process.env.OXYLABS_BASE_PORT   || '8001', 10);
-const UPSTREAM_PROXY_RANGE = parseInt(process.env.OXYLABS_PORT_RANGE   || '99',   10);
+import { getConfig, getConfigNumber } from './config';
+import type { PoolConfig } from './browser-pool';
 
 // ─── Email → profile dir ──────────────────────────────────────────────────────
 
@@ -48,8 +41,8 @@ function emailToSafeName(email: string): string {
 }
 
 /** Absolute path to the persistent profile for this email. */
-export function profileDirFor(email: string): string {
-  return join(PROFILE_BASE, emailToSafeName(email));
+export function profileDirFor(email: string, config: PoolConfig): string {
+  return join(config.profileDir, emailToSafeName(email));
 }
 
 // ─── Chrome path helper ───────────────────────────────────────────────────────
@@ -67,22 +60,29 @@ export function getChromePath(): string {
 
 export class CachedProfilePool implements BrowserPool {
   readonly type: PoolType = 'ephemeral';
-  readonly concurrency    = CONCURRENCY;
+  readonly concurrency: number;
+  private readonly config: PoolConfig;
 
   // p-limit limiter — the single source of truth for concurrency.
   // Each acquire() schedules one "task" that stays in-flight until release() resolves.
-  private readonly limit = pLimit(CONCURRENCY);
+  private readonly limit: ReturnType<typeof pLimit>;
 
   // Port-slot tracking: which slot indices are currently occupied.
   // Guaranteed to never exceed CONCURRENCY because the limiter gates entry.
   private readonly usedSlots = new Set<number>();
   private slotCounter = 0;
 
+  constructor(config: PoolConfig) {
+    this.config = config;
+    this.concurrency = config.concurrency;
+    this.limit = pLimit(this.concurrency);
+  }
+
   private nextFreeSlot(): number {
-    for (let i = 0; i < CONCURRENCY; i++) {
-      const candidate = (this.slotCounter + i) % CONCURRENCY;
+    for (let i = 0; i < this.concurrency; i++) {
+      const candidate = (this.slotCounter + i) % this.concurrency;
       if (!this.usedSlots.has(candidate)) {
-        this.slotCounter = (candidate + 1) % CONCURRENCY;
+        this.slotCounter = (candidate + 1) % this.concurrency;
         this.usedSlots.add(candidate);
         return candidate;
       }
@@ -117,9 +117,9 @@ export class CachedProfilePool implements BrowserPool {
       try {
         slotIndex = this.nextFreeSlot();
 
-        const cdpPort    = BASE_CDP_PORT   + slotIndex;
-        const localProxy = BASE_PROXY_PORT + slotIndex;
-        const upstreamPx = UPSTREAM_PROXY_BASE + (slotIndex % UPSTREAM_PROXY_RANGE);
+        const cdpPort    = this.config.baseCdpPort   + slotIndex;
+        const localProxy = this.config.baseProxyPort + slotIndex;
+        const upstreamPx = this.config.upstreamProxyBase + (slotIndex % this.config.upstreamProxyRange);
 
         // 1. Spin up local unauthenticated proxy
         const proxyHelper = join(process.cwd(), 'src', 'lib', 'run-proxy.js');
@@ -130,9 +130,9 @@ export class CachedProfilePool implements BrowserPool {
             stdio: 'ignore',
             env: {
               ...process.env,
-              OXYLABS_PROXY_HOST: process.env.OXYLABS_PROXY_HOST ?? 'isp.oxylabs.io',
-              OXYLABS_PROXY_USER: process.env.OXYLABS_PROXY_USER ?? '',
-              OXYLABS_PROXY_PASS: process.env.OXYLABS_PROXY_PASS ?? '',
+              OXYLABS_PROXY_HOST: this.config.proxyHost,
+              OXYLABS_PROXY_USER: this.config.proxyUser,
+              OXYLABS_PROXY_PASS: this.config.proxyPass,
             },
           },
         );
@@ -141,7 +141,7 @@ export class CachedProfilePool implements BrowserPool {
         await sleep(800);
 
         // 2. Ensure the persistent profile directory exists
-        const profileDir = profileDirFor(email);
+        const profileDir = profileDirFor(email, this.config);
         await mkdir(profileDir, { recursive: true });
 
         // 3. Launch Chrome

@@ -64,17 +64,47 @@ const _instances = new Map<PoolType, BrowserPool>();
  *   const pool = await getPool('persistent');
  *   const pool = await getPool();              // → ephemeral (default)
  */
+export interface PoolConfig {
+  concurrency: number;
+  baseCdpPort: number;
+  baseProxyPort: number;
+  profileDir: string;
+  proxyHost: string;
+  proxyUser: string;
+  proxyPass: string;
+  upstreamProxyBase: number;
+  upstreamProxyRange: number;
+  chromePath: string | undefined;
+}
+
+export function loadPoolConfig(): PoolConfig {
+  const { getConfig, getConfigNumber } = require('./config');
+  return {
+    concurrency: getConfigNumber('BULK_CONCURRENCY', 10),
+    baseCdpPort: parseInt(process.env.BULK_BASE_PORT || '9300', 10),
+    baseProxyPort: parseInt(process.env.BULK_BASE_PROXY_PORT || '10100', 10),
+    profileDir: process.env.BULK_PROFILE_DIR || '/tmp/ggchecks-profiles',
+    proxyHost: getConfig('OXYLABS_PROXY_HOST') || 'isp.oxylabs.io',
+    proxyUser: getConfig('OXYLABS_PROXY_USER') || '',
+    proxyPass: getConfig('OXYLABS_PROXY_PASS') || '',
+    upstreamProxyBase: parseInt(process.env.OXYLABS_BASE_PORT || '8001', 10),
+    upstreamProxyRange: parseInt(process.env.OXYLABS_PORT_RANGE || '99', 10),
+    chromePath: process.env.CHROME_PATH,
+  };
+}
+
 export async function getPool(type: PoolType = 'ephemeral'): Promise<BrowserPool> {
   if (_instances.has(type)) return _instances.get(type)!;
 
   let pool: BrowserPool;
+  const config = loadPoolConfig();
 
   if (type === 'persistent') {
     const { PersistentChromePool } = await import('./chrome-pool');
-    pool = new PersistentChromePool();
+    pool = new PersistentChromePool(config);
   } else {
     const { CachedProfilePool } = await import('./chrome-profile-pool');
-    pool = new CachedProfilePool();
+    pool = new CachedProfilePool(config);
   }
 
   _instances.set(type, pool);

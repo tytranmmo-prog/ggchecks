@@ -1,7 +1,8 @@
-import { exec }        from 'child_process';
+import { exec, spawn } from 'child_process';
 import { NextRequest } from 'next/server';
 import { updateCreditResult, uploadScreenshotToDrive, updateErrorScreenshot } from '@/lib/sheets';
 import { getPool } from '@/lib/browser-pool';
+import { getAllConfigs } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
         send({ type: 'log', message: `Acquired slot on debug port ${port}.` });
 
         const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port };
-        const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
+        const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
         const cmd = `npx tsx "${scriptPath}"`;
 
         log(`spawning: ${cmd}`);

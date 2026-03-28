@@ -13,11 +13,8 @@ import { spawn }        from 'child_process';
 import { join }         from 'path';
 import type { BrowserHandle, BrowserPool, PoolType } from './browser-pool';
 
-// ─── Configuration ────────────────────────────────────────────────────────────
-
-export const CONCURRENCY = parseInt(process.env.BULK_CONCURRENCY || '10', 10);
-export const BASE_PORT   = parseInt(process.env.BULK_BASE_PORT   || '9300', 10);
-export const PROFILE_DIR = process.env.BULK_PROFILE_DIR || '/tmp/ggchecks-profiles';
+import { getConfig, getConfigNumber } from './config';
+import type { PoolConfig } from './browser-pool';
 
 // ─── Helpers (still exported for direct use / tests) ────────────────────────
 
@@ -31,7 +28,7 @@ export function getChromePath(): string {
 }
 
 /** Start Chrome on a specific port (no-op if already running). */
-export async function ensureChrome(port: number): Promise<void> {
+export async function ensureChrome(port: number, config: PoolConfig): Promise<void> {
   try {
     const r = await fetch(`http://localhost:${port}/json/version`, {
       signal: AbortSignal.timeout(1500),
@@ -39,10 +36,10 @@ export async function ensureChrome(port: number): Promise<void> {
     if (r.ok) return;
   } catch { /* not up yet */ }
 
-  const profileDir = `${PROFILE_DIR}/slot-${port}`;
-  const portIndex  = port - BASE_PORT;
+  const profileDir = `${config.profileDir}/slot-${port}`;
+  const portIndex  = port - config.baseCdpPort;
 
-  const proxyPort      = 8001 + (portIndex % 99);
+  const proxyPort      = config.upstreamProxyBase + (portIndex % config.upstreamProxyRange);
   const localProxyPort = 10000 + proxyPort;
 
   const proxyHelper = join(process.cwd(), 'src', 'lib', 'run-proxy.js');
@@ -51,9 +48,9 @@ export async function ensureChrome(port: number): Promise<void> {
     stdio:    'ignore',
     env: {
       ...process.env,
-      OXYLABS_PROXY_HOST: process.env.OXYLABS_PROXY_HOST ?? 'isp.oxylabs.io',
-      OXYLABS_PROXY_USER: process.env.OXYLABS_PROXY_USER ?? '',
-      OXYLABS_PROXY_PASS: process.env.OXYLABS_PROXY_PASS ?? '',
+      OXYLABS_PROXY_HOST: config.proxyHost,
+      OXYLABS_PROXY_USER: config.proxyUser,
+      OXYLABS_PROXY_PASS: config.proxyPass,
     },
   });
   proxyChild.unref();
@@ -89,14 +86,18 @@ export async function ensureChrome(port: number): Promise<void> {
 
 export class PersistentChromePool implements BrowserPool {
   readonly type: PoolType = 'persistent';
-  readonly concurrency = CONCURRENCY;
+  readonly concurrency: number;
+  private readonly config: PoolConfig;
 
   // Slot availability map: port → free?
   private readonly slots: Record<number, boolean> = {};
 
-  constructor() {
-    for (let i = 0; i < CONCURRENCY; i++) {
-      this.slots[BASE_PORT + i] = true;
+  constructor(config: PoolConfig) {
+    this.config = config;
+    this.concurrency = config.concurrency;
+
+    for (let i = 0; i < this.concurrency; i++) {
+      this.slots[this.config.baseCdpPort + i] = true;
     }
   }
 
@@ -110,7 +111,7 @@ export class PersistentChromePool implements BrowserPool {
 
         if (port !== undefined) {
           this.slots[port] = false;
-          await ensureChrome(port);
+          await ensureChrome(port, this.config);
           resolve({
             port,
             release: async () => { this.slots[port] = true; },

@@ -2,6 +2,7 @@ import { createReadStream } from 'fs';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import { google } from 'googleapis';
+import { getConfig } from './config';
 
 const SHEET_NAME = 'Accounts';
 const HEADER_ROW = ['email', 'password', 'totpSecret', 'monthlyCredits', 'additionalCredits', 'additionalCreditsExpiry', 'memberActivities', 'lastChecked', 'status', 'screenshot'];
@@ -39,7 +40,7 @@ function getAuth() {
 
 // ... getsheet methods ...
 async function getSheet() {
-  const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID!, getAuth());
+  const doc = new GoogleSpreadsheet(getConfig('GOOGLE_SHEET_ID')!, getAuth());
   await doc.loadInfo();
 
   let sheet = doc.sheetsByTitle[SHEET_NAME];
@@ -117,7 +118,7 @@ export async function uploadScreenshotToDrive(localPath: string): Promise<string
   const auth = getAuth();
   const drive = google.drive({ version: 'v3', auth });
 
-  const folderId = process.env.DRIVE_SCREENSHOT_FOLDER_ID; // optional
+  const folderId = getConfig('DRIVE_SCREENSHOT_FOLDER_ID'); // optional
 
   let file;
   try {

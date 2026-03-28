@@ -7,6 +7,7 @@ config({ path: resolve(process.cwd(), '.env.local') });
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import accounts from '../accounts.json';
+import { getConfig } from '../src/lib/config';
 
 const SHEET_NAME = 'Accounts';
 const HEADER_ROW = ['email', 'password', 'totpSecret', 'monthlyCredits', 'additionalCredits', 'additionalCreditsExpiry', 'memberActivities', 'lastChecked', 'status'];
@@ -18,7 +19,7 @@ async function seed() {
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 
-  const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID!, auth);
+  const doc = new GoogleSpreadsheet(getConfig('GOOGLE_SHEET_ID')!, auth);
   await doc.loadInfo();
   console.log(`📄 Connected to: ${doc.title}`);
 

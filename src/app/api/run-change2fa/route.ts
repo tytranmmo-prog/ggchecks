@@ -1,11 +1,13 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { exec } from 'child_process';
 import { update2FASecret } from '@/lib/sheets';
+import { getAllConfigs } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, rowIndex } = body;
+  const { email, password, totpSecret, rowIndex, port } = body;
 
   if (!email || !password || !totpSecret || !rowIndex) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
@@ -20,12 +22,10 @@ export async function POST(req: NextRequest) {
 
       const cwd = process.cwd();
       const scriptPath = process.env.CHANGE2FA_PATH ?? `${cwd}/change2fa.ts`;
-      const accountData = { email, password, totpSecret };
+      const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port };
 
-      const { exec } = await import('child_process' as string);
-
-      const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
-      const cmd = `bun "${scriptPath}"`;
+      const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
+      const cmd = `npx tsx "${scriptPath}"`;
 
       send({ type: 'log', message: `🔐 Starting 2FA rotation for ${email}...` });
 
