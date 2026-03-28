@@ -178,6 +178,25 @@ export async function googleLogin(
 
   if (isTotpPrompt) {
     log('TOTP prompt detected (login)...');
+
+    // Handle the interstitial "Choose how you want to sign in" screen
+    const interstitialSelectors = [
+      'div[role="link"]:has-text("Google Authenticator")',
+      'div[data-challengerole="TOPT"]',
+      'text="Get a verification code from the Google Authenticator app"',
+      'text="Google Authenticator"'
+    ];
+
+    for (const sel of interstitialSelectors) {
+      const loc = page.locator(sel).first();
+      if (await loc.isVisible().catch(() => false)) {
+        log(`Selecting Google Authenticator option from menu...`);
+        await loc.click().catch(() => {});
+        await sleep(1500); // Wait for the input field to render
+        break;
+      }
+    }
+
     await fillAndSubmitTOTP(page, totpSecret, 'login');
     // fillAndSubmitTOTP already waits for the redirect;
     // give an extra moment for any post-redirect animations

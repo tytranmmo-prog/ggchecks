@@ -1,6 +1,6 @@
 import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
-import { updateCreditResult } from '@/lib/sheets';
+import { updateCreditResult, uploadScreenshotToDrive, updateErrorScreenshot } from '@/lib/sheets';
 import { getPool, type PoolType } from '@/lib/browser-pool';
 
 export const runtime = 'nodejs';
@@ -124,18 +124,47 @@ export async function POST(req: NextRequest) {
             log(`[${account.email}] done ✓`);
             completed++;
           } else {
-            throw new Error(String(result.error) || 'Unknown error from checker');
+            // Checker returned a structured error — may include a screenshotPath
+            const errObj: Error & { screenshotPath?: string } = Object.assign(
+              new Error(String(result.error) || 'Unknown error from checker'),
+              { screenshotPath: result.screenshotPath as string | undefined },
+            );
+            throw errObj;
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           log(`[${account.email}] ERROR:`, msg);
-          send({ type: 'account_error', rowIndex: account.rowIndex, error: msg });
+
+          let screenshotUrl: string | undefined;
+          if (typeof err === 'object' && err !== null && 'screenshotPath' in err) {
+            const p = (err as { screenshotPath?: string }).screenshotPath;
+            if (p) {
+              screenshotUrl = `/screenshots/${p.split('/').pop()}`;
+            }
+          }
+          // Also try parsing stdout if it's a JSON error from checkOne
+          if (!screenshotUrl) {
+            try {
+              const parsed = JSON.parse(msg) as { screenshotPath?: string };
+              if (parsed.screenshotPath) {
+                screenshotUrl = `/screenshots/${parsed.screenshotPath.split('/').pop()}`;
+              }
+            } catch { /* msg isn't JSON, that's fine */ }
+          }
+
+          send({ type: 'account_error', rowIndex: account.rowIndex, error: msg, screenshotUrl });
 
           await updateCreditResult(account.rowIndex, {
             monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
             memberActivities: '', lastChecked: new Date().toISOString(),
             status: `error: ${msg.slice(0, 100)}`,
           }).catch(e => log(`[${account.email}] sheets error update failed:`, e));
+
+          // We no longer update the sheet with a screenshot URL.
+          // if (screenshotUrl) {
+          //   await updateErrorScreenshot(account.rowIndex, screenshotUrl)
+          //     .catch(e => log(`[${account.email}] screenshot column update failed:`, e));
+          // }
 
           errors++;
         } finally {

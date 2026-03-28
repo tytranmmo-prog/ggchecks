@@ -247,6 +247,18 @@ export default function HomePage() {
                     <td>{statusBadge(account.status)}</td>
                     <td>
                       <div className="action-cell">
+                        {account.status && account.status.startsWith('error') && (
+                          <a
+                            href={`/screenshots/${account.email.replace('@', '_at_')}.png`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-secondary btn-icon"
+                            title="View Error Screenshot"
+                            style={{ textDecoration: 'none' }}
+                          >
+                            📸
+                          </a>
+                        )}
                         <button
                           className="btn btn-success"
                           onClick={() => setCheckTarget(account)}

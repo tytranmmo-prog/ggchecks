@@ -1,103 +1,145 @@
+import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
-import { updateCreditResult } from '@/lib/sheets';
+import { updateCreditResult, uploadScreenshotToDrive, updateErrorScreenshot } from '@/lib/sheets';
+import { getPool } from '@/lib/browser-pool';
 
 export const runtime = 'nodejs';
 
+const log = (...args: unknown[]) =>
+  console.log(`[check ${new Date().toISOString()}]`, ...args);
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, rowIndex, debugPort } = body;
+  const { email, password, totpSecret, rowIndex } = body;
 
   if (!email || !password || !totpSecret || !rowIndex) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
   }
 
-  const encoder = new TextEncoder();
+  const encoder    = new TextEncoder();
+  const scriptPath = process.env.CHECKER_PATH ?? `${process.cwd()}/checkOne.ts`;
 
   const stream = new ReadableStream({
     async start(controller) {
-      const cwd = process.cwd();
-      const scriptPath = process.env.CHECKER_PATH ?? `${cwd}/checkOne.ts`;
+      const send = (data: object) => {
+        try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); }
+        catch { /* stream already closed */ }
+      };
 
-      // Stealth mode: include debugPort so checkOne.ts uses connectOverCDP
-      const accountData: Record<string, unknown> = { email, password, totpSecret };
-      if (debugPort) accountData.debugPort = Number(debugPort);
+      let cleanup = () => {};
 
-      // Use exec (shell string) so Turbopack doesn't analyze args as module paths
-      const { exec } = await import('child_process' as string);
+      try {
+        send({ type: 'log', message: `Waiting for Chrome profile slot...` });
+        const pool = await getPool('persistent');
+        const { port, release } = await pool.acquire(email);
+        cleanup = () => release().catch(e => log(`[${email}] release error:`, e));
 
-      // Safely pass account JSON via environment variable to avoid shell injection
-      const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
+        send({ type: 'log', message: `Acquired slot on debug port ${port}.` });
 
-      // Stealth mode needs npx tsx (Node) — connectOverCDP doesn't work in Bun's WS impl
-      const cmd = debugPort
-        ? `npx tsx "${scriptPath}"`
-        : `bun "${scriptPath}"`;
+        const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port };
+        const env = { ...process.env, ACCOUNT_JSON: JSON.stringify(accountData) };
+        const cmd = `npx tsx "${scriptPath}"`;
 
-      const child = exec(cmd, { env: env as NodeJS.ProcessEnv, maxBuffer: 10 * 1024 * 1024 });
+        log(`spawning: ${cmd}`);
 
-      child.stderr?.on('data', (d: string | Buffer) => {
-        const lines = d.toString().split('\n').filter((l: string) => l.trim());
-        for (const line of lines) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', message: line })}\n\n`));
-        }
-      });
+        await new Promise<void>((resolveProc) => {
+          const child = exec(cmd, {
+            env:       env as NodeJS.ProcessEnv,
+            timeout:   120_000,
+            maxBuffer: 10 * 1024 * 1024,
+          });
 
-      let resultBuf = '';
-      child.stdout?.on('data', (d: string | Buffer) => { resultBuf += d.toString(); });
+        // stderr → log events (live streaming)
+        child.stderr?.on('data', (d: string | Buffer) => {
+          const lines = d.toString().split('\n').filter((l: string) => l.trim());
+          for (const line of lines) {
+            send({ type: 'log', message: line });
+          }
+        });
 
-      await new Promise<void>((resolveProc) => {
+        // stdout → accumulate for final JSON parse
+        let resultBuf = '';
+        child.stdout?.on('data', (d: string | Buffer) => { resultBuf += d.toString(); });
+
+        child.on('error', (err: Error) => {
+          log(`child error for ${email}:`, err.message);
+          send({ type: 'error', message: err.message });
+          resolveProc();
+        });
+
         child.on('close', async (code: number | null) => {
+          log(`checker exited code=${code} stdout=${resultBuf.length}b`);
           try {
-            const result = JSON.parse(resultBuf.trim());
+            const raw = resultBuf.trim();
+            if (!raw) {
+              throw new Error(`Empty stdout from checker (exit ${code})`);
+            }
+            const result = JSON.parse(raw);
+
             if (result.success) {
               const memberText = (result.memberActivities || [])
                 .map((m: { name: string; credit: number }) => `${m.name}: ${m.credit}`)
                 .join(' | ');
               try {
                 await updateCreditResult(rowIndex, {
-                  monthlyCredits: result.monthlyCredits || '',
-                  additionalCredits: result.additionalCredits || '',
+                  monthlyCredits:          result.monthlyCredits          || '',
+                  additionalCredits:       result.additionalCredits       || '',
                   additionalCreditsExpiry: result.additionalCreditsExpiry || '',
-                  memberActivities: memberText,
-                  lastChecked: result.checkAt || new Date().toISOString(),
-                  status: 'ok',
+                  memberActivities:        memberText,
+                  lastChecked:             result.checkAt                 || new Date().toISOString(),
+                  status:                  'ok',
                 });
               } catch (saveErr: unknown) {
                 const msg = saveErr instanceof Error ? saveErr.message : 'Unknown';
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', message: `⚠️ Sheet save error: ${msg}` })}\n\n`));
+                send({ type: 'log', message: `⚠️ Sheet save error: ${msg}` });
               }
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'result', data: result })}\n\n`));
+              send({ type: 'result', data: result });
             } else {
+              let screenshotUrl: string | undefined;
+              if (result.screenshotPath) {
+                // Just map it directly to the public path
+                screenshotUrl = `/screenshots/${result.screenshotPath.split('/').pop()}`;
+                send({ type: 'log', message: `📸 Screenshot saved locally as ${screenshotUrl}` });
+              }
+
               await updateCreditResult(rowIndex, {
                 monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
                 memberActivities: '', lastChecked: new Date().toISOString(),
                 status: `error: ${result.error}`,
               }).catch(() => {});
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: result.error })}\n\n`));
-            }
-          } catch {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: `Parse error (exit ${code})` })}\n\n`));
-          }
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
-          controller.close();
-          resolveProc();
-        });
 
-        child.on('error', (err: Error) => {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`));
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
-          controller.close();
+              // We no longer update the sheet with a screenshot URL since we serve it locally.
+              // if (screenshotUrl) {
+              //   await updateErrorScreenshot(rowIndex, screenshotUrl).catch(() => {});
+              // }
+
+              send({ type: 'error', message: result.error, screenshotUrl });
+            }
+          } catch (parseErr) {
+            const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+            const preview = resultBuf.slice(0, 300);
+            send({ type: 'error', message: `${msg}${preview ? ` | stdout: ${preview}` : ''}` });
+          }
+
           resolveProc();
         });
       });
+      } catch (poolErr) {
+        const msg = poolErr instanceof Error ? poolErr.message : String(poolErr);
+        send({ type: 'error', message: msg });
+      } finally {
+        cleanup();
+        send({ type: 'done' });
+        controller.close();
+      }
     },
   });
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
+      'Content-Type':  'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      'Connection':    'keep-alive',
     },
   });
 }
