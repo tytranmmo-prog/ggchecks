@@ -39,6 +39,8 @@ export default function HomePage() {
   const [showBulkCheck, setShowBulkCheck] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
+  const [resettingProfile, setResettingProfile] = useState<number | null>(null);
+  const [resettingAll, setResettingAll] = useState(false);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -84,6 +86,44 @@ export default function HomePage() {
       showToast(e instanceof Error ? e.message : 'Failed to delete', 'error');
     } finally {
       setDeletingRow(null);
+    }
+  };
+
+  const handleResetProfile = async (account: Account) => {
+    if (!confirm(`Reset Chrome profile for ${account.email}?\n\nThis will delete all cached login data. The account will need to authenticate from scratch on the next check.`)) return;
+    setResettingProfile(account.rowIndex);
+    try {
+      const res = await fetch('/api/profile', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: account.email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showToast(`Profile reset for ${account.email}`, 'success');
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed to reset profile', 'error');
+    } finally {
+      setResettingProfile(null);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!confirm('Reset ALL Chrome profiles?\n\nEvery account will need to log in from scratch on the next check.')) return;
+    setResettingAll(true);
+    try {
+      const res = await fetch('/api/profile', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showToast('All Chrome profiles deleted', 'success');
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed to reset all profiles', 'error');
+    } finally {
+      setResettingAll(false);
     }
   };
 
@@ -134,6 +174,14 @@ export default function HomePage() {
           </button>
           <button className="btn btn-secondary" onClick={() => setShowSettings(true)} title="Configuration Settings">
             ⚙️ Settings
+          </button>
+          <button
+            className="btn btn-warning"
+            onClick={handleResetAll}
+            disabled={resettingAll || accounts.length === 0}
+            title="Delete all Chrome profiles — every account re-authenticates on next check"
+          >
+            {resettingAll ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Resetting...</> : '🧹 Reset All Profiles'}
           </button>
           <button
             className="btn btn-success"
@@ -277,6 +325,14 @@ export default function HomePage() {
                           title="Change 2FA secret"
                         >
                           🔐 2FA
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-icon"
+                          onClick={() => handleResetProfile(account)}
+                          disabled={resettingProfile === account.rowIndex}
+                          title="Reset Chrome profile — forces full re-login next check"
+                        >
+                          {resettingProfile === account.rowIndex ? <span className="spinner" /> : '🧹'}
                         </button>
                         <button
                           className="btn btn-danger btn-icon"
