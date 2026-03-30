@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "check:one": "bun checkOne.ts",
-    "change2fa": "bun change2fa.ts"
+    "change2fa": "bun change2fa.ts",
+    "logs": "cat logs/app.log | bunx pino-pretty",
+    "logs:tail": "tail -f logs/app.log | bunx pino-pretty",
+    "logs:errors": "cat logs/app.log | bunx pino-pretty | grep -A2 'ERROR'"
   },
   "dependencies": {
     "google-auth-library": "^10.6.2",
@@ -29,6 +32,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "pino-pretty": "^13.1.3",
     "typescript": "^5"
   },
   "trustedDependencies": [
