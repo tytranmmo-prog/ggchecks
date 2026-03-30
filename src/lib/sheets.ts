@@ -3,6 +3,9 @@ import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import { google } from 'googleapis';
 import { getConfig } from './config';
+import { createLogger } from './pino-logger';
+
+const log = createLogger('sheets');
 
 const SHEET_NAME = 'Accounts';
 const HEADER_ROW = ['email', 'password', 'totpSecret', 'monthlyCredits', 'additionalCredits', 'additionalCreditsExpiry', 'memberActivities', 'lastChecked', 'status', 'screenshot'];
@@ -138,7 +141,7 @@ export async function uploadScreenshotToDrive(localPath: string): Promise<string
     });
   } catch (err: any) {
     if (folderId && err.message?.toLowerCase().includes('not found')) {
-      console.warn(`⚠️ Invalid Drive Folder ID (${folderId}). Uploading to root instead.`);
+      log.warn('Invalid Drive Folder ID — uploading to root instead', { folderId });
       file = await drive.files.create({
         requestBody: { name: localPath.split('/').pop(), mimeType: 'image/png' },
         media: { mimeType: 'image/png', body: createReadStream(localPath) },

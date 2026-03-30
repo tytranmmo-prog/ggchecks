@@ -93,7 +93,7 @@ export function loadPoolConfig(): PoolConfig {
     upstreamProxyBase:  getConfigNumber('OXYLABS_BASE_PORT', 8001),
     upstreamProxyRange: getConfigNumber('OXYLABS_PORT_RANGE', 99),
     chromePath:         getConfig('CHROME_PATH') || undefined,
-    gpmBaseUrl:         getConfig('GPM_BASE_URL') || 'http://127.0.0.1:19995',
+    gpmBaseUrl:         getConfig('GPM_BASE_URL') || 'http://127.0.0.1:9495',
   };
 }
 

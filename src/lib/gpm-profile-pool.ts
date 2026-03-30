@@ -16,18 +16,8 @@
  *     - Calls gpm.profiles.stop(id) → GPMLogin closes the browser process.
  *     - Profile data (cookies, fingerprint) stays in GPMLogin for next run.
  *
- * Key differences from CachedProfilePool:
- *   - No Chrome spawn / kill — GPMLogin owns the process.
- *   - No run-proxy.js sidecar — proxy is stored in the GPM profile itself.
- *   - CDP port comes from the GPMLogin API response, not a manual port counter.
- *
- * Proxy format for GPMLogin: IP:PORT:Username:Password
- *   e.g. "isp.oxylabs.io:8001:user123:pass456"
- *
- * Concurrency: same p-limit deferred-promise pattern as CachedProfilePool.
- *
- * Config env vars:
- *   GPM_BASE_URL         — GPMLogin local server URL (default http://127.0.0.1:19995)
+ * Log feature tag: 'gpm-pool'
+ * Per-account context: all log calls inside acquire() carry { email } via child().
  *
  * Implements: BrowserPool (browser-pool.ts)
  */
@@ -36,15 +26,16 @@ import pLimit from 'p-limit';
 import type { BrowserHandle, BrowserPool, PoolConfig, PoolType } from './browser-pool';
 import { GpmLoginClient } from './gpm-login';
 import type { Profile } from './gpm-login';
+import type { ILogger } from './logger';
+import { createLogger } from './pino-logger';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /** Profile name prefix so GPM-managed profiles are recognisable in the UI. */
 const PROFILE_PREFIX = 'ggchecks::';
 
-/** Tagged logger — always on, easy to grep in server output. */
-const log = (...args: unknown[]) =>
-  console.log(`[GpmProfilePool ${new Date().toISOString()}]`, ...args);
+/** Feature-scoped logger — all child loggers inherit the 'gpm-pool' feature tag. */
+const log = createLogger('gpm-pool');
 
 // ─── GpmProfilePool ───────────────────────────────────────────────────────────
 
@@ -59,21 +50,15 @@ export class GpmProfilePool implements BrowserPool {
   /**
    * Cache: profile name → GPM Profile object.
    * Owned by findProfileByName — it checks here first and populates on miss.
-   * Keyed by the full profile name (with PROFILE_PREFIX), not the raw email.
    */
   private readonly profileCache = new Map<string, Profile>();
 
-  /**
-   * Slot tracking — mirrors CachedProfilePool.
-   * Each slot maps to a deterministic CDP port: baseCdpPort + slotIndex.
-   * Guaranteed to stay within CONCURRENCY because p-limit gates entry.
-   */
+  /** Slot tracking — each slot maps to a deterministic CDP port. */
   private readonly usedSlots = new Set<number>();
   private slotCounter = 0;
 
   /**
    * Cached latest Chromium version string fetched from GPMLogin.
-   * Populated on first profile creation; reused for all subsequent ones.
    * `null` = not yet fetched. `undefined` = fetch failed (skip version field).
    */
   private latestChromiumVersion: string | null | undefined = null;
@@ -82,9 +67,12 @@ export class GpmProfilePool implements BrowserPool {
     this.config = config;
     this.concurrency = config.concurrency;
     this.limit = pLimit(this.concurrency);
-    const gpmBaseUrl = config.gpmBaseUrl;
-    this.gpm = new GpmLoginClient(gpmBaseUrl);
-    log(`Initialised | concurrency=${config.concurrency} gpmBaseUrl=${gpmBaseUrl} baseCdpPort=${config.baseCdpPort}`);
+    this.gpm = new GpmLoginClient(config.gpmBaseUrl);
+    log.info('Initialised', {
+      concurrency: config.concurrency,
+      gpmBaseUrl: config.gpmBaseUrl,
+      baseCdpPort: config.baseCdpPort,
+    });
   }
 
   // ── Slot management ───────────────────────────────────────────────────────
@@ -104,30 +92,25 @@ export class GpmProfilePool implements BrowserPool {
 
   // ── Profile resolution ────────────────────────────────────────────────────
 
-  /**
-   * Find or create the GPM profile for this email.
-   *
-   * GPMLogin does NOT auto-create profiles on `start` — we must ensure the
-   * profile exists before calling the start endpoint.
-   *
-   * Returns the GPM profile ID (a UUID string).
-   */
   private async resolveProfileId(email: string, proxyRaw: string): Promise<string> {
     const profileName = `${PROFILE_PREFIX}${email}`;
-    log(`resolveProfileId | email=${email} profileName=${profileName}`);
+    const plog = log.child({ email, profileName });
+    plog.debug('resolveProfileId | start');
 
-    // findProfileByName handles its own cache — no duplicate cache logic here.
     const found = await this.findProfileByName(profileName);
     if (found) {
-      log(`resolveProfileId | profile found id=${found.id}`);
+      plog.debug('resolveProfileId | profile found', { profileId: found.id });
       return found.id;
     }
 
-    // No profile found → create one with the proxy pre-attached.
-    log(`resolveProfileId | no profile found, creating... proxy=${proxyRaw ? proxyRaw.split(':')[0] + ':***' : 'none'}`);
+    plog.info('resolveProfileId | no profile — creating', {
+      proxyHost: proxyRaw ? `${proxyRaw.split(':')[0]}:***` : 'none',
+    });
 
     const browserVersion = await this.getLatestChromiumVersion();
-    log(`resolveProfileId | using browser_version=${browserVersion ?? 'default'}`);
+    plog.debug('resolveProfileId | using browser_version', {
+      browserVersion: browserVersion ?? 'default (GPMLogin)',
+    });
 
     const created = await this.gpm.profiles.create({
       name: profileName,
@@ -136,93 +119,76 @@ export class GpmProfilePool implements BrowserPool {
     });
 
     if (!created.success || !created.data) {
-      log(`resolveProfileId | create FAILED message=${created.message}`);
+      plog.error('resolveProfileId | create FAILED', { message: created.message });
       throw new Error(
         `[GpmProfilePool] Failed to create GPM profile for ${email}: ${created.message}`,
       );
     }
 
-    log(`resolveProfileId | profile created id=${created.data.id}`);
-    // Populate cache so subsequent acquire() calls skip the API search.
+    plog.info('resolveProfileId | profile created', { profileId: created.data.id });
     this.profileCache.set(profileName, created.data);
     return created.data.id;
   }
 
-  /**
-   * Fetch and cache the latest Chromium version from GPMLogin.
-   *
-   * Called once on first profile creation. Subsequent calls return the
-   * cached value immediately without hitting the API.
-   *
-   * Returns `undefined` if the API call fails (profile is created without
-   * an explicit version, letting GPMLogin pick its default).
-   */
   private async getLatestChromiumVersion(): Promise<string | undefined> {
-    // Already fetched (string) or already failed (undefined) — return cached.
     if (this.latestChromiumVersion !== null) return this.latestChromiumVersion ?? undefined;
 
-    log('getLatestChromiumVersion | fetching available versions from GPMLogin');
+    log.debug('getLatestChromiumVersion | fetching from GPMLogin');
     try {
       const res = await this.gpm.browsers.versions();
       if (res.success && res.data?.chromium?.length) {
         this.latestChromiumVersion = res.data.chromium[0];
-        log(`getLatestChromiumVersion | latest=${this.latestChromiumVersion} (${res.data.chromium.length} versions available)`);
+        log.info('getLatestChromiumVersion | fetched', {
+          latest: this.latestChromiumVersion,
+          available: res.data.chromium.length,
+        });
       } else {
-        log('getLatestChromiumVersion | empty response, will use GPMLogin default');
+        log.warn('getLatestChromiumVersion | empty response — using GPMLogin default');
         this.latestChromiumVersion = undefined;
       }
     } catch (err) {
-      log('getLatestChromiumVersion | fetch FAILED, will use GPMLogin default', err);
+      log.warn('getLatestChromiumVersion | FAILED — using GPMLogin default', {
+        err: String(err),
+      });
       this.latestChromiumVersion = undefined;
     }
 
     return this.latestChromiumVersion ?? undefined;
   }
 
-  /**
-   * Look up a GPM profile by exact name.
-   *
-   * Checks the in-process cache first — if a previous call already found or
-   * created this profile, the API is never called again. On a cache miss,
-   * pages through the GPMLogin profile list until a match is found (or all
-   * pages are exhausted), then stores the result in cache before returning.
-   *
-   * Returns the matching Profile, or `null` if it does not exist in GPMLogin.
-   */
   private async findProfileByName(name: string): Promise<Profile | null> {
-    // ── Cache hit ──────────────────────────────────────────────────────────
     const cached = this.profileCache.get(name);
     if (cached) {
-      log(`findProfileByName | CACHE HIT name=${name} id=${cached.id}`);
+      log.debug('findProfileByName | CACHE HIT', { name, profileId: cached.id });
       return cached;
     }
 
-    // ── API search (paginated) ─────────────────────────────────────────────
-    log(`findProfileByName | cache miss, searching API name=${name}`);
+    log.debug('findProfileByName | cache miss — searching API', { name });
     let page = 1;
 
     for (;;) {
-      log(`findProfileByName | fetching page=${page} page_size=50`);
+      log.debug('findProfileByName | fetching page', { name, page, pageSize: 50 });
       const res = await this.gpm.profiles.list({ page, page_size: 50, search: name });
 
       if (!res.success || !res.data) {
-        log(`findProfileByName | API error or empty response, aborting search`);
+        log.warn('findProfileByName | API error — aborting search', { name });
         break;
       }
 
-      log(`findProfileByName | page=${page}/${res.data.last_page} total=${res.data.total} returned=${res.data.data.length}`);
+      log.debug('findProfileByName | page result', {
+        name, page, lastPage: res.data.last_page,
+        total: res.data.total, returned: res.data.data.length,
+      });
 
       const match = res.data.data.find((p) => p.name === name);
       if (match) {
-        log(`findProfileByName | FOUND id=${match.id} name=${match.name}`);
-        // Populate cache before returning so the next call is instant.
+        log.debug('findProfileByName | FOUND', { name, profileId: match.id });
         this.profileCache.set(name, match);
         return match;
       }
 
-      // Stop when we've retrieved the last page.
       if (page >= res.data.last_page) {
-        log(`findProfileByName | exhausted all pages, profile not found`);
+        log.debug('findProfileByName | exhausted all pages — not found', { name });
         break;
       }
       page++;
@@ -234,11 +200,13 @@ export class GpmProfilePool implements BrowserPool {
   // ── acquire ───────────────────────────────────────────────────────────────
 
   acquire(email: string): Promise<BrowserHandle> {
-    log(`acquire | queued email=${email} active=${this.limit.activeCount} pending=${this.limit.pendingCount}`);
+    // Bind email to every log call within this acquire() scope.
+    const alog = log.child({ email });
+    alog.info('acquire | queued', {
+      active: this.limit.activeCount,
+      pending: this.limit.pendingCount,
+    });
 
-    // Deferred-promise pattern (identical to CachedProfilePool):
-    // The p-limit task wraps a deferred that only resolves when release() is
-    // called, so the concurrency slot stays occupied for the full browser session.
     let resolveDeferred!: () => void;
     const deferred = new Promise<void>((res) => { resolveDeferred = res; });
 
@@ -252,34 +220,30 @@ export class GpmProfilePool implements BrowserPool {
     this.limit(async () => {
       let profileId = '';
       let slotIndex = -1;
-      log(`acquire | slot granted email=${email} active=${this.limit.activeCount}`);
+      alog.info('acquire | slot granted', { active: this.limit.activeCount });
 
       try {
-        // Assign a deterministic slot → CDP port before calling GPMLogin.
         slotIndex = this.nextFreeSlot();
-        const cdpPort       = this.config.baseCdpPort + slotIndex;
-        const proxyPort     = this.config.upstreamProxyBase + (slotIndex % this.config.upstreamProxyRange);
-        const slotProxyRaw  = buildGpmProxy(this.config, proxyPort);
-        log(`acquire | slotIndex=${slotIndex} cdpPort=${cdpPort} proxyPort=${proxyPort}`);
+        const cdpPort      = this.config.baseCdpPort + slotIndex;
+        const proxyPort    = this.config.upstreamProxyBase + (slotIndex % this.config.upstreamProxyRange);
+        const slotProxyRaw = buildGpmProxy(this.config, proxyPort);
+        alog.debug('acquire | slot assigned', { slotIndex, cdpPort, proxyPort });
 
-        // Build the creation-time proxy (base port — slot not yet known at creation).
         const createProxyRaw = buildGpmProxy(this.config, this.config.upstreamProxyBase);
 
-        // 1. Ensure GPM profile exists (create if necessary).
         profileId = await this.resolveProfileId(email, createProxyRaw);
 
-        // 2. Update the profile's proxy to the slot-specific port so no two
-        //    concurrent sessions in the same batch share the same upstream proxy.
         if (slotProxyRaw) {
-          log(`acquire | updating proxy to port=${proxyPort} for profileId=${profileId}`);
+          alog.debug('acquire | updating proxy to slot port', { proxyPort, profileId });
           const updateRes = await this.gpm.profiles.update(profileId, { raw_proxy: slotProxyRaw });
           if (!updateRes.success) {
-            log(`acquire | proxy update FAILED (non-fatal): ${updateRes.message}`);
+            alog.warn('acquire | proxy update FAILED (non-fatal)', {
+              profileId, message: updateRes.message,
+            });
           }
         }
 
-        // 3. Ask GPMLogin to open the browser on the pre-assigned port.
-        log(`acquire | calling GPM start profileId=${profileId} cdpPort=${cdpPort}`);
+        alog.info('acquire | calling GPM start', { profileId, cdpPort });
         const startRes = await this.gpm.profiles.start(profileId, {
           remote_debugging_port: cdpPort,
         });
@@ -290,30 +254,36 @@ export class GpmProfilePool implements BrowserPool {
           );
         }
 
-        log(`acquire | GPM start OK profileId=${profileId} cdpPort=${cdpPort}`);
+        alog.info('acquire | GPM start OK', { profileId, cdpPort });
 
-        // 3. Wait until the CDP endpoint is reachable.
-        await waitForCdp(cdpPort);
+        await waitForCdp(cdpPort, alog);
 
-        log(`acquire | browser ready email=${email} profileId=${profileId} port=${cdpPort}`);
+        alog.info('acquire | browser ready', { profileId, port: cdpPort });
 
-        // 4. Expose handle; release() stops the browser via GPMLogin.
         const release = async (): Promise<void> => {
-          log(`release | stopping browser email=${email} profileId=${profileId} port=${cdpPort}`);
+          alog.info('release | stopping browser', { profileId, port: cdpPort });
           try {
             await this.gpm.profiles.stop(profileId);
-            log(`release | GPM stop OK profileId=${profileId}`);
+            alog.info('release | GPM stop OK', { profileId });
           } catch (err) {
-            log(`release | GPM stop FAILED profileId=${profileId}`, err);
+            alog.error('release | GPM stop FAILED', { profileId, err: String(err) });
           }
           this.usedSlots.delete(slotIndex);
-          log(`release | done email=${email} slot=${slotIndex} active=${this.limit.activeCount - 1} pending=${this.limit.pendingCount}`);
+          alog.debug('release | slot freed', {
+            slot: slotIndex,
+            active: this.limit.activeCount - 1,
+            pending: this.limit.pendingCount,
+          });
           resolveDeferred();
         };
 
         handleResolve({ port: cdpPort, release });
       } catch (err) {
-        log(`acquire | ERROR email=${email} profileId=${profileId || 'n/a'} slot=${slotIndex}`, err);
+        alog.error('acquire | ERROR', {
+          profileId: profileId || 'n/a',
+          slot: slotIndex,
+          err: err instanceof Error ? err.message : String(err),
+        });
         if (slotIndex >= 0) this.usedSlots.delete(slotIndex);
         handleReject(err);
         resolveDeferred();
@@ -321,7 +291,10 @@ export class GpmProfilePool implements BrowserPool {
 
       // Keep the p-limit slot occupied until release() is called.
       await deferred;
-      log(`acquire | slot released email=${email} active=${this.limit.activeCount} pending=${this.limit.pendingCount}`);
+      alog.debug('acquire | p-limit slot returned', {
+        active: this.limit.activeCount,
+        pending: this.limit.pendingCount,
+      });
     });
 
     return handlePromise;
@@ -330,23 +303,13 @@ export class GpmProfilePool implements BrowserPool {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Build a proxy connection string in GPMLogin format: IP:PORT:Username:Password
- *
- * @param config  Pool config supplying host/user/pass.
- * @param port    Upstream proxy port for this specific slot.
- *                Pass `upstreamProxyBase` at profile-creation time (slot unknown);
- *                pass the computed slot port just before `start()`.
- */
 function buildGpmProxy(config: PoolConfig, port: number): string {
-  if (!config.proxyHost || !config.proxyUser || !config.proxyPass) {
-    return ''; // No proxy configured.
-  }
+  if (!config.proxyHost || !config.proxyUser || !config.proxyPass) return '';
   return `${config.proxyHost}:${port}:${config.proxyUser}:${config.proxyPass}`;
 }
 
 /** Poll the CDP /json/version endpoint until the browser is responding. */
-async function waitForCdp(port: number, attempts = 30): Promise<void> {
+async function waitForCdp(port: number, alog: ILogger, attempts = 30): Promise<void> {
   for (let i = 0; i < attempts; i++) {
     await sleep(500);
     try {
@@ -354,12 +317,12 @@ async function waitForCdp(port: number, attempts = 30): Promise<void> {
         signal: AbortSignal.timeout(1000),
       });
       if (r.ok) {
-        log(`waitForCdp | port=${port} ready after ${((i + 1) * 500) / 1000}s`);
+        alog.debug('waitForCdp | ready', { port, after: `${((i + 1) * 500) / 1000}s` });
         return;
       }
     } catch { /* still starting */ }
     if (i > 0 && i % 5 === 0) {
-      log(`waitForCdp | port=${port} still waiting... attempt=${i + 1}/${attempts}`);
+      alog.debug('waitForCdp | still waiting', { port, attempt: i + 1, total: attempts });
     }
   }
   throw new Error(

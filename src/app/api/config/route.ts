@@ -3,6 +3,9 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { getConfig, ALLOWED_KEYS } from '@/lib/config';
+import { createLogger } from '@/lib/pino-logger';
+
+const log = createLogger('config');
 
 export async function GET() {
   try {
@@ -13,7 +16,7 @@ export async function GET() {
 
     return NextResponse.json({ config: finalConfig });
   } catch (error: unknown) {
-    console.error('Failed to get config:', error);
+    log.error('GET config failed', { err: String(error) });
     return NextResponse.json({ error: 'Failed to retrieve configuration' }, { status: 500 });
   }
 }
@@ -48,7 +51,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, message: 'Configuration updated successfully' });
   } catch (error: unknown) {
-    console.error('Failed to save config:', error);
+    log.error('POST config save failed', { err: String(error) });
     return NextResponse.json({ error: 'Failed to save configuration' }, { status: 500 });
   }
 }

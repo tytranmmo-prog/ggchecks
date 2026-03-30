@@ -1,13 +1,20 @@
 import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
-import { updateCreditResult, uploadScreenshotToDrive, updateErrorScreenshot } from '@/lib/sheets';
+import { updateCreditResult } from '@/lib/sheets';
 import { getPool, type PoolType } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
+import { createLogger } from '@/lib/pino-logger';
+import type { ILogger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
-const log = (...args: unknown[]) =>
-  console.log(`[bulk-check ${new Date().toISOString()}]`, ...args);
+/** Feature-scoped logger for all bulk-check activity. */
+const log = createLogger('bulk-check');
+
+/** Generate a short random ID to correlate all logs for one bulk-check run. */
+function randomRunId(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
 
 interface AccountInput {
   rowIndex: number;
@@ -17,35 +24,36 @@ interface AccountInput {
 }
 
 // ── runCheck ──────────────────────────────────────────────────────────────────
-// Uses a static `exec` import (no dynamic import hack) to avoid silent hangs.
 
 function runCheck(
   account: AccountInput,
   debugPort: number,
   scriptPath: string,
+  alog: ILogger,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const accountData = { ...account, debugPort };
     const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
 
-    log(`[${account.email}] spawning checker on port ${debugPort}`);
+    alog.debug('spawning checker', { port: debugPort, scriptPath });
 
     const child = exec(
       `npx tsx "${scriptPath}"`,
       { env, timeout: 120_000, maxBuffer: 5 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err && !stdout?.trim()) {
-          log(`[${account.email}] checker error:`, stderr?.trim() || err.message);
-          reject(new Error(stderr?.trim() || err.message || 'Process failed'));
+          const msg = stderr?.trim() || err.message;
+          alog.error('checker process error', { err: msg });
+          reject(new Error(msg || 'Process failed'));
         } else {
-          log(`[${account.email}] checker stdout (${stdout?.length ?? 0} bytes)`);
+          alog.debug('checker stdout received', { bytes: stdout?.length ?? 0 });
           resolve(stdout || '');
         }
       },
     );
 
     child.on('exit', (code, signal) =>
-      log(`[${account.email}] checker exited code=${code} signal=${signal}`),
+      alog.debug('checker exited', { code, signal }),
     );
   });
 }
@@ -60,19 +68,23 @@ export async function POST(req: NextRequest) {
     : body.poolType === 'ephemeral' ? 'ephemeral'
     : 'gpm';
 
-  log(`request: ${accounts?.length ?? 0} accounts, pool=${poolType}`);
+  // Unique ID for correlating all log lines of this single bulk-check run.
+  const runId = randomRunId();
+  const rlog = log.child({ runId, poolType, total: accounts?.length ?? 0 });
+
+  rlog.info('request received', { accountCount: accounts?.length ?? 0, poolType });
 
   if (!accounts?.length) {
     return new Response(JSON.stringify({ error: 'No accounts' }), { status: 400 });
   }
 
-  const encoder   = new TextEncoder();
+  const encoder    = new TextEncoder();
   const scriptPath = getConfig('CHECKER_PATH') || `${process.cwd()}/checkOne.ts`;
 
-  log(`using scriptPath=${scriptPath}`);
+  rlog.debug('resolved scriptPath', { scriptPath });
 
   const pool = await getPool(poolType);
-  log(`pool ready: type=${pool.type} concurrency=${pool.concurrency}`);
+  rlog.info('pool ready', { type: pool.type, concurrency: pool.concurrency });
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -87,20 +99,20 @@ export async function POST(req: NextRequest) {
       let errors    = 0;
 
       const tasks = accounts.map(async (account) => {
-        log(`[${account.email}] waiting for pool slot…`);
+        // Bind email + rowIndex to every log call for this account.
+        const alog = rlog.child({ email: account.email, rowIndex: account.rowIndex });
+        alog.info('account task | waiting for pool slot');
 
         let release: (() => Promise<void>) | undefined;
         let port: number | undefined;
 
         try {
-          // acquire() itself may throw (e.g. Chrome failed to start).
-          // We wrap it here so the semaphore is always released even on startup failure.
           ({ port, release } = await pool.acquire(account.email));
-          log(`[${account.email}] acquired port=${port}`);
+          alog.info('account task | slot acquired', { port });
           send({ type: 'account_start', rowIndex: account.rowIndex, email: account.email, port });
           send({ type: 'chrome_ready', port });
 
-          const stdout = await runCheck(account, port, scriptPath);
+          const stdout = await runCheck(account, port, scriptPath, alog);
 
           let result: Record<string, unknown>;
           try {
@@ -121,13 +133,12 @@ export async function POST(req: NextRequest) {
               memberActivities:        memberText,
               lastChecked:             String(result.checkAt                 ?? new Date().toISOString()),
               status:                  'ok',
-            }).catch(e => log(`[${account.email}] sheets update failed:`, e));
+            }).catch(e => alog.error('sheets update failed', { err: String(e) }));
 
             send({ type: 'account_done', rowIndex: account.rowIndex, result });
-            log(`[${account.email}] done ✓`);
+            alog.info('account task | done ✓');
             completed++;
           } else {
-            // Checker returned a structured error — may include a screenshotPath
             const errObj: Error & { screenshotPath?: string } = Object.assign(
               new Error(String(result.error) || 'Unknown error from checker'),
               { screenshotPath: result.screenshotPath as string | undefined },
@@ -136,23 +147,18 @@ export async function POST(req: NextRequest) {
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          log(`[${account.email}] ERROR:`, msg);
+          alog.error('account task | FAILED', { err: msg });
 
           let screenshotUrl: string | undefined;
           if (typeof err === 'object' && err !== null && 'screenshotPath' in err) {
             const p = (err as { screenshotPath?: string }).screenshotPath;
-            if (p) {
-              screenshotUrl = `/screenshots/${p.split('/').pop()}`;
-            }
+            if (p) screenshotUrl = `/screenshots/${p.split('/').pop()}`;
           }
-          // Also try parsing stdout if it's a JSON error from checkOne
           if (!screenshotUrl) {
             try {
               const parsed = JSON.parse(msg) as { screenshotPath?: string };
-              if (parsed.screenshotPath) {
-                screenshotUrl = `/screenshots/${parsed.screenshotPath.split('/').pop()}`;
-              }
-            } catch { /* msg isn't JSON, that's fine */ }
+              if (parsed.screenshotPath) screenshotUrl = `/screenshots/${parsed.screenshotPath.split('/').pop()}`;
+            } catch { /* msg is not JSON */ }
           }
 
           send({ type: 'account_error', rowIndex: account.rowIndex, error: msg, screenshotUrl });
@@ -161,29 +167,20 @@ export async function POST(req: NextRequest) {
             monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
             memberActivities: '', lastChecked: new Date().toISOString(),
             status: `error: ${msg.slice(0, 100)}`,
-          }).catch(e => log(`[${account.email}] sheets error update failed:`, e));
-
-          // We no longer update the sheet with a screenshot URL.
-          // if (screenshotUrl) {
-          //   await updateErrorScreenshot(account.rowIndex, screenshotUrl)
-          //     .catch(e => log(`[${account.email}] screenshot column update failed:`, e));
-          // }
+          }).catch(e => alog.error('sheets error-status update failed', { err: String(e) }));
 
           errors++;
         } finally {
-          // CRITICAL: always release — even if acquire() itself threw.
-          // release is only defined if acquire() succeeded, in which case
-          // the semaphore was already incremented and MUST be decremented.
           if (release) {
-            log(`[${account.email}] releasing port=${port}`);
-            await release().catch(e => log(`[${account.email}] release error:`, e));
+            alog.debug('account task | releasing pool slot', { port });
+            await release().catch(e => alog.error('release error', { err: String(e) }));
           }
         }
       });
 
-      log(`all ${tasks.length} tasks launched, awaiting…`);
+      rlog.info('all tasks launched', { count: tasks.length });
       await Promise.all(tasks);
-      log(`all tasks done: completed=${completed} errors=${errors}`);
+      rlog.info('all tasks done', { completed, errors });
 
       send({ type: 'done', completed, errors });
       controller.close();

@@ -26,6 +26,9 @@ import type { BrowserHandle, BrowserPool, PoolType } from './browser-pool';
 
 import { getConfig, getConfigNumber } from './config';
 import type { PoolConfig } from './browser-pool';
+import { createLogger } from './pino-logger';
+
+const log = createLogger('chrome-profile-pool');
 
 // ─── Email → profile dir ──────────────────────────────────────────────────────
 
@@ -173,16 +176,21 @@ export class CachedProfilePool implements BrowserPool {
           await sleep(300); // let OS release file locks
           // Profile dir preserved — session cache survives across runs.
           this.usedSlots.delete(slotIndex);
-          console.debug(
-            `[CachedProfilePool] slot ${slotIndex} released` +
-            ` | active=${this.limit.activeCount} pending=${this.limit.pendingCount}`,
-          );
+          log.debug('slot released', {
+            slot: slotIndex,
+            active: this.limit.activeCount,
+            pending: this.limit.pendingCount,
+          });
           resolveDeferred(); // unblocks the p-limit task → frees the slot
         };
 
         handleResolve({ port: cdpPort, release });
       } catch (err) {
         // Startup failed — clean up, free the slot, propagate the error.
+        log.error('acquire failed — cleaning up slot', {
+          slot: slotIndex,
+          err: err instanceof Error ? err.message : String(err),
+        });
         if (chromeChild) safeKill(chromeChild);
         if (proxyChild)  safeKill(proxyChild);
         if (slotIndex >= 0) this.usedSlots.delete(slotIndex);

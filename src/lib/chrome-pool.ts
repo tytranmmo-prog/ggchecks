@@ -15,6 +15,9 @@ import type { BrowserHandle, BrowserPool, PoolType } from './browser-pool';
 
 import { getConfig, getConfigNumber } from './config';
 import type { PoolConfig } from './browser-pool';
+import { createLogger } from './pino-logger';
+
+const log = createLogger('chrome-pool');
 
 // ─── Helpers (still exported for direct use / tests) ────────────────────────
 
@@ -34,9 +37,13 @@ export async function ensureChrome(port: number, config: PoolConfig): Promise<vo
     const r = await fetch(`http://localhost:${port}/json/version`, {
       signal: AbortSignal.timeout(1500),
     });
-    if (r.ok) return;
+    if (r.ok) {
+      log.debug('ensureChrome | already running', { port });
+      return;
+    }
   } catch { /* not up yet */ }
 
+  log.info('ensureChrome | launching Chrome', { port });
   const profileDir = `${config.profileDir}/slot-${port}`;
   const portIndex  = port - config.baseCdpPort;
 
@@ -77,9 +84,16 @@ export async function ensureChrome(port: number, config: PoolConfig): Promise<vo
       const r = await fetch(`http://localhost:${port}/json/version`, {
         signal: AbortSignal.timeout(1000),
       });
-      if (r.ok) return;
+      if (r.ok) {
+        log.info('ensureChrome | Chrome ready', { port, after: `${((i + 1) * 500) / 1000}s` });
+        return;
+      }
     } catch { /* still starting */ }
+    if (i > 0 && i % 5 === 0) {
+      log.debug('ensureChrome | still waiting for Chrome', { port, attempt: i + 1 });
+    }
   }
+  log.error('ensureChrome | Chrome failed to start', { port });
   throw new Error(`Chrome on port ${port} did not start within 15 s`);
 }
 
@@ -103,7 +117,9 @@ export class PersistentChromePool implements BrowserPool {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  acquire(_email: string): Promise<BrowserHandle> {
+  acquire(email: string): Promise<BrowserHandle> {
+    const alog = log.child({ email });
+    alog.info('acquire | waiting for free slot');
     return new Promise(resolve => {
       const poll = async () => {
         const port = Object.keys(this.slots)
@@ -112,10 +128,14 @@ export class PersistentChromePool implements BrowserPool {
 
         if (port !== undefined) {
           this.slots[port] = false;
+          alog.info('acquire | slot acquired', { port });
           await ensureChrome(port, this.config);
           resolve({
             port,
-            release: async () => { this.slots[port] = true; },
+            release: async () => {
+              this.slots[port] = true;
+              alog.debug('release | slot freed', { port });
+            },
           });
         } else {
           setTimeout(poll, 200);

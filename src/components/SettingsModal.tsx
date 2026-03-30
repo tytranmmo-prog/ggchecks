@@ -106,7 +106,7 @@ const SECTIONS: SectionDef[] = [
       {
         key: 'GPM_BASE_URL',
         label: 'GPMLogin API URL',
-        placeholder: 'e.g. http://127.0.0.1:19995',
+        placeholder: 'e.g. http://127.0.0.1:9495',
         hint: 'Local GPMLogin Global server base URL.',
       },
       {

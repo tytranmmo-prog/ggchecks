@@ -3,11 +3,11 @@ import { NextRequest } from 'next/server';
 import { updateCreditResult, uploadScreenshotToDrive, updateErrorScreenshot } from '@/lib/sheets';
 import { getPool } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
+import { createLogger } from '@/lib/pino-logger';
 
 export const runtime = 'nodejs';
 
-const log = (...args: unknown[]) =>
-  console.log(`[check ${new Date().toISOString()}]`, ...args);
+const log = createLogger('check');
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -19,6 +19,8 @@ export async function POST(req: NextRequest) {
 
   const encoder    = new TextEncoder();
   const scriptPath = getConfig('CHECKER_PATH') || `${process.cwd()}/checkOne.ts`;
+  // Bind email + rowIndex to every server-side log for this request.
+  const rlog = log.child({ email, rowIndex });
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -33,7 +35,7 @@ export async function POST(req: NextRequest) {
         send({ type: 'log', message: `Waiting for GPM browser slot...` });
         const pool = await getPool('gpm');
         const { port, release } = await pool.acquire(email);
-        cleanup = () => release().catch(e => log(`[${email}] release error:`, e));
+        cleanup = () => release().catch(e => rlog.error('release error', { err: String(e) }));
 
         send({ type: 'log', message: `Acquired slot on debug port ${port}.` });
 
@@ -41,7 +43,7 @@ export async function POST(req: NextRequest) {
         const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
         const cmd = `npx tsx "${scriptPath}"`;
 
-        log(`spawning: ${cmd}`);
+        rlog.debug('spawning checker', { port, cmd });
 
         await new Promise<void>((resolveProc) => {
           const child = exec(cmd, {
@@ -63,13 +65,13 @@ export async function POST(req: NextRequest) {
         child.stdout?.on('data', (d: string | Buffer) => { resultBuf += d.toString(); });
 
         child.on('error', (err: Error) => {
-          log(`child error for ${email}:`, err.message);
+          rlog.error('child process error', { err: err.message });
           send({ type: 'error', message: err.message });
           resolveProc();
         });
 
         child.on('close', async (code: number | null) => {
-          log(`checker exited code=${code} stdout=${resultBuf.length}b`);
+          rlog.info('checker exited', { code, stdoutBytes: resultBuf.length });
           try {
             const raw = resultBuf.trim();
             if (!raw) {

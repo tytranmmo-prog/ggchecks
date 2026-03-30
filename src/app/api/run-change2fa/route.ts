@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { update2FASecret } from '@/lib/sheets';
 import { getAllConfigs, getConfig } from '@/lib/config';
+import { createLogger } from '@/lib/pino-logger';
 
 export const runtime = 'nodejs';
+
+const log = createLogger('2fa');
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -23,6 +26,10 @@ export async function POST(req: NextRequest) {
       const cwd = process.cwd();
       const scriptPath = getConfig('CHANGE2FA_PATH') || `${cwd}/change2fa.ts`;
       const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port };
+
+      // Bind email + rowIndex for every server-side log in this request.
+      const rlog = log.child({ email, rowIndex, port });
+      rlog.info('2FA rotation requested', { scriptPath });
 
       const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
       const cmd = `npx tsx "${scriptPath}"`;
@@ -48,24 +55,29 @@ export async function POST(req: NextRequest) {
 
       await new Promise<void>((resolveProc) => {
         child.on('close', async (code: number | null) => {
+          rlog.info('2fa script exited', { code, stdoutBytes: resultBuf.length });
           try {
             const result = JSON.parse(resultBuf.trim());
 
             if (result.success) {
-              // Save the new TOTP secret to the spreadsheet
+              rlog.info('2fa rotation succeeded', { newSecret: result.newTotpSecret ? '***' : 'none' });
               try {
                 await update2FASecret(rowIndex, result.newTotpSecret);
                 send({ type: 'log', message: `✅ New secret saved to sheet: ${result.newTotpSecret}` });
               } catch (saveErr: unknown) {
                 const msg = saveErr instanceof Error ? saveErr.message : 'Unknown';
+                rlog.error('sheet save error', { err: msg });
                 send({ type: 'log', message: `⚠️ Sheet save error: ${msg}` });
               }
               send({ type: 'result', data: result });
             } else {
-              send({ type: 'error', message: result.error || `Script exited with code ${code}` });
+              const errMsg = result.error || `Script exited with code ${code}`;
+              rlog.error('2fa rotation failed', { err: errMsg });
+              send({ type: 'error', message: errMsg });
             }
           } catch {
             const raw = resultBuf.trim().slice(0, 300);
+            rlog.error('output parse error', { code, preview: raw });
             send({ type: 'error', message: `Parse error (exit ${code}): ${raw}` });
           }
 
@@ -75,6 +87,7 @@ export async function POST(req: NextRequest) {
         });
 
         child.on('error', (err: Error) => {
+          rlog.error('child process error', { err: err.message });
           send({ type: 'error', message: err.message });
           send({ type: 'done' });
           controller.close();

@@ -13,7 +13,7 @@
   "GOOGLE_DELEGATED_SUBJECT": "",
 
   "CHROME_PATH": "",
-  "GPM_BASE_URL": "http://127.0.0.1:19995",
+  "GPM_BASE_URL": "http://127.0.0.1:9495",
   "BULK_BASE_PORT": "9300",
   "BULK_BASE_PROXY_PORT": "10100",
   "BULK_PROFILE_DIR": "/tmp/ggchecks-profiles",

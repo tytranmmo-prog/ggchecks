@@ -7,7 +7,7 @@
  * by calling the `start` / `stop` profile endpoints.
  *
  * Base URL: http://{{Local URL}}/api/v1
- * Default:  http://127.0.0.1:19995/api/v1
+ * Default:  http://127.0.0.1:9495/api/v1
  *
  * All endpoints return a standard ApiResponse<T> envelope:
  *   { success: boolean, data: T | null, message: string, sender: string }
@@ -337,13 +337,13 @@ export interface BrowserVersionsData {
  * Lightweight HTTP client for the GPMLogin Global Local API.
  *
  * @example
- * const gpm = new GpmLoginClient('http://127.0.0.1:19995');
+ * const gpm = new GpmLoginClient('http://127.0.0.1:9495');
  * const groups = await gpm.groups.list();
  */
 export class GpmLoginClient {
   private readonly base: string;
 
-  constructor(localUrl = 'http://127.0.0.1:19995') {
+  constructor(localUrl = 'http://127.0.0.1:9495') {
     this.base = `${localUrl.replace(/\/$/, '')}/api/v1`;
   }
 
