@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { update2FASecret } from '@/lib/sheets';
-import { getAllConfigs } from '@/lib/config';
+import { getAllConfigs, getConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
       const cwd = process.cwd();
-      const scriptPath = process.env.CHANGE2FA_PATH ?? `${cwd}/change2fa.ts`;
+      const scriptPath = getConfig('CHANGE2FA_PATH') || `${cwd}/change2fa.ts`;
       const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port };
 
       const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };

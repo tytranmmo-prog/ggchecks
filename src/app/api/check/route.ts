@@ -2,7 +2,7 @@ import { exec, spawn } from 'child_process';
 import { NextRequest } from 'next/server';
 import { updateCreditResult, uploadScreenshotToDrive, updateErrorScreenshot } from '@/lib/sheets';
 import { getPool } from '@/lib/browser-pool';
-import { getAllConfigs } from '@/lib/config';
+import { getAllConfigs, getConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   }
 
   const encoder    = new TextEncoder();
-  const scriptPath = process.env.CHECKER_PATH ?? `${process.cwd()}/checkOne.ts`;
+  const scriptPath = getConfig('CHECKER_PATH') || `${process.cwd()}/checkOne.ts`;
 
   const stream = new ReadableStream({
     async start(controller) {

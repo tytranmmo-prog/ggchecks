@@ -31,12 +31,34 @@ export function getConfigNumber(key: string, defaultValue = 0): number {
 }
 
 export const ALLOWED_KEYS = [
+  // General
   'BULK_CONCURRENCY',
+
+  // Proxy (Oxylabs)
   'OXYLABS_PROXY_HOST',
   'OXYLABS_PROXY_USER',
   'OXYLABS_PROXY_PASS',
+  'OXYLABS_BASE_PORT',
+  'OXYLABS_PORT_RANGE',
+
+  // Google Sheets / Drive
   'GOOGLE_SHEET_ID',
-  'DRIVE_SCREENSHOT_FOLDER_ID'
+  'DRIVE_SCREENSHOT_FOLDER_ID',
+  'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+  'GOOGLE_DELEGATED_SUBJECT',
+  // NOTE: GOOGLE_PRIVATE_KEY is intentionally absent — its multi-line PEM
+  //       format is fragile in JSON. Keep it in .env.local only.
+
+  // Browser / GPMLogin
+  'CHROME_PATH',
+  'GPM_BASE_URL',
+  'BULK_BASE_PORT',
+  'BULK_BASE_PROXY_PORT',
+  'BULK_PROFILE_DIR',
+
+  // Scripts
+  'CHECKER_PATH',
+  'CHANGE2FA_PATH',
 ];
 
 /**

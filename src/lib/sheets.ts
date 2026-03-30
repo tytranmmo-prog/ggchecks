@@ -22,8 +22,8 @@ export interface Account {
 
 function getAuth() {
   const jwtOptions: any = {
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+    email: getConfig('GOOGLE_SERVICE_ACCOUNT_EMAIL'),
+    key: (getConfig('GOOGLE_PRIVATE_KEY') || '').replace(/\\n/g, '\n'),
     scopes: [
       'https://www.googleapis.com/auth/spreadsheets',
       'https://www.googleapis.com/auth/drive',
@@ -31,8 +31,9 @@ function getAuth() {
   };
 
   // If using OAuth delegation (Domain-Wide Delegation), authenticate as this user
-  if (process.env.GOOGLE_DELEGATED_SUBJECT) {
-    jwtOptions.subject = process.env.GOOGLE_DELEGATED_SUBJECT;
+  const delegatedSubject = getConfig('GOOGLE_DELEGATED_SUBJECT');
+  if (delegatedSubject) {
+    jwtOptions.subject = delegatedSubject;
   }
 
   return new JWT(jwtOptions);

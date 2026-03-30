@@ -13,7 +13,7 @@
  * The limiter wraps a deferred promise that resolves only when release() is called,
  * so the slot stays occupied for the full duration of the check.
  *
- * Profile root: process.env.BULK_PROFILE_DIR  (default /tmp/ggchecks-profiles)
+ * Profile root: getConfig('BULK_PROFILE_DIR')  (default /tmp/ggchecks-profiles)
  *
  * Implements: BrowserPool (browser-pool.ts)
  */
@@ -48,7 +48,8 @@ export function profileDirFor(email: string, config: PoolConfig): string {
 // ─── Chrome path helper ───────────────────────────────────────────────────────
 
 export function getChromePath(): string {
-  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const configured = getConfig('CHROME_PATH');
+  if (configured) return configured;
   if (process.platform === 'darwin')
     return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   if (process.platform === 'win32')

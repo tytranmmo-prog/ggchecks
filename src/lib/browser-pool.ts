@@ -83,17 +83,17 @@ export interface PoolConfig {
 export function loadPoolConfig(): PoolConfig {
   const { getConfig, getConfigNumber } = require('./config');
   return {
-    concurrency: getConfigNumber('BULK_CONCURRENCY', 10),
-    baseCdpPort: parseInt(process.env.BULK_BASE_PORT || '9300', 10),
-    baseProxyPort: parseInt(process.env.BULK_BASE_PROXY_PORT || '10100', 10),
-    profileDir: process.env.BULK_PROFILE_DIR || '/tmp/ggchecks-profiles',
-    proxyHost: getConfig('OXYLABS_PROXY_HOST') || 'isp.oxylabs.io',
-    proxyUser: getConfig('OXYLABS_PROXY_USER') || '',
-    proxyPass: getConfig('OXYLABS_PROXY_PASS') || '',
-    upstreamProxyBase: parseInt(process.env.OXYLABS_BASE_PORT || '8001', 10),
-    upstreamProxyRange: parseInt(process.env.OXYLABS_PORT_RANGE || '99', 10),
-    chromePath: process.env.CHROME_PATH,
-    gpmBaseUrl: process.env.GPM_BASE_URL || 'http://127.0.0.1:19995',
+    concurrency:        getConfigNumber('BULK_CONCURRENCY', 10),
+    baseCdpPort:        getConfigNumber('BULK_BASE_PORT', 9300),
+    baseProxyPort:      getConfigNumber('BULK_BASE_PROXY_PORT', 10100),
+    profileDir:         getConfig('BULK_PROFILE_DIR') || '/tmp/ggchecks-profiles',
+    proxyHost:          getConfig('OXYLABS_PROXY_HOST') || 'isp.oxylabs.io',
+    proxyUser:          getConfig('OXYLABS_PROXY_USER') || '',
+    proxyPass:          getConfig('OXYLABS_PROXY_PASS') || '',
+    upstreamProxyBase:  getConfigNumber('OXYLABS_BASE_PORT', 8001),
+    upstreamProxyRange: getConfigNumber('OXYLABS_PORT_RANGE', 99),
+    chromePath:         getConfig('CHROME_PATH') || undefined,
+    gpmBaseUrl:         getConfig('GPM_BASE_URL') || 'http://127.0.0.1:19995',
   };
 }
 

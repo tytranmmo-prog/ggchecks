@@ -19,7 +19,8 @@ import type { PoolConfig } from './browser-pool';
 // ─── Helpers (still exported for direct use / tests) ────────────────────────
 
 export function getChromePath(): string {
-  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const configured = getConfig('CHROME_PATH');
+  if (configured) return configured;
   if (process.platform === 'darwin')
     return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   if (process.platform === 'win32')

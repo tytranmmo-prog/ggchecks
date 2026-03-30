@@ -82,7 +82,7 @@ export class GpmProfilePool implements BrowserPool {
     this.config = config;
     this.concurrency = config.concurrency;
     this.limit = pLimit(this.concurrency);
-    const gpmBaseUrl = process.env.GPM_BASE_URL ?? 'http://127.0.0.1:9495';
+    const gpmBaseUrl = config.gpmBaseUrl;
     this.gpm = new GpmLoginClient(gpmBaseUrl);
     log(`Initialised | concurrency=${config.concurrency} gpmBaseUrl=${gpmBaseUrl} baseCdpPort=${config.baseCdpPort}`);
   }
