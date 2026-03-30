@@ -30,8 +30,8 @@ export async function POST(req: NextRequest) {
       let cleanup = () => {};
 
       try {
-        send({ type: 'log', message: `Waiting for Chrome profile slot...` });
-        const pool = await getPool('persistent');
+        send({ type: 'log', message: `Waiting for GPM browser slot...` });
+        const pool = await getPool('gpm');
         const { port, release } = await pool.acquire(email);
         cleanup = () => release().catch(e => log(`[${email}] release error:`, e));
 

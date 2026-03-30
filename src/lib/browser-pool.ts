@@ -6,6 +6,7 @@
  * Implementations:
  *  - chrome-pool.ts          — PersistentChromePool  (Chrome stays alive between checks)
  *  - chrome-profile-pool.ts  — CachedProfilePool     (profile dir per email, session reused)
+ *  - gpm-profile-pool.ts     — GpmProfilePool        (GPMLogin Global manages the browser)
  *
  * Pool selection is a RUNTIME decision — callers pass a PoolType directly.
  * The factory keeps one singleton instance per type so persistent Chrome
@@ -15,7 +16,7 @@
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 /** Discriminated union of all pool modes the UI can select. */
-export type PoolType = 'ephemeral' | 'persistent';
+export type PoolType = 'ephemeral' | 'persistent' | 'gpm';
 
 /** Returned by `BrowserPool.acquire()`. */
 export interface BrowserHandle {
@@ -75,6 +76,8 @@ export interface PoolConfig {
   upstreamProxyBase: number;
   upstreamProxyRange: number;
   chromePath: string | undefined;
+  /** GPMLogin Global local server URL. Only used by GpmProfilePool. */
+  gpmBaseUrl: string;
 }
 
 export function loadPoolConfig(): PoolConfig {
@@ -90,6 +93,7 @@ export function loadPoolConfig(): PoolConfig {
     upstreamProxyBase: parseInt(process.env.OXYLABS_BASE_PORT || '8001', 10),
     upstreamProxyRange: parseInt(process.env.OXYLABS_PORT_RANGE || '99', 10),
     chromePath: process.env.CHROME_PATH,
+    gpmBaseUrl: process.env.GPM_BASE_URL || 'http://127.0.0.1:19995',
   };
 }
 
@@ -102,6 +106,9 @@ export async function getPool(type: PoolType = 'ephemeral'): Promise<BrowserPool
   if (type === 'persistent') {
     const { PersistentChromePool } = await import('./chrome-pool');
     pool = new PersistentChromePool(config);
+  } else if (type === 'gpm') {
+    const { GpmProfilePool } = await import('./gpm-profile-pool');
+    pool = new GpmProfilePool(config);
   } else {
     const { CachedProfilePool } = await import('./chrome-profile-pool');
     pool = new CachedProfilePool(config);

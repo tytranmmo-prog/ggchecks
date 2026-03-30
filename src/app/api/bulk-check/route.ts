@@ -56,7 +56,9 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const accounts: AccountInput[] = body.accounts;
   const poolType: PoolType =
-    body.poolType === 'persistent' ? 'persistent' : 'ephemeral';
+    body.poolType === 'persistent' ? 'persistent'
+    : body.poolType === 'ephemeral' ? 'ephemeral'
+    : 'gpm';
 
   log(`request: ${accounts?.length ?? 0} accounts, pool=${poolType}`);
 
