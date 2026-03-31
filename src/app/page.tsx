@@ -37,6 +37,7 @@ export default function HomePage() {
   const [twoFATarget, setTwoFATarget] = useState<Account | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkCheck, setShowBulkCheck] = useState(false);
+  const [showBulkCheckFailed, setShowBulkCheckFailed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
   const [resettingProfile, setResettingProfile] = useState<number | null>(null);
@@ -182,6 +183,14 @@ export default function HomePage() {
             title="Delete all Chrome profiles — every account re-authenticates on next check"
           >
             {resettingAll ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Resetting...</> : '🧹 Reset All Profiles'}
+          </button>
+          <button
+            className="btn btn-warning"
+            onClick={() => setShowBulkCheckFailed(true)}
+            disabled={accounts.filter(a => a.status?.startsWith('error')).length === 0}
+            title="Re-check only accounts with failed status"
+          >
+            ⚠️ Check Failed ({accounts.filter(a => a.status?.startsWith('error')).length})
           </button>
           <button
             className="btn btn-success"
@@ -382,6 +391,14 @@ export default function HomePage() {
         <BulkCheckModal
           accounts={accounts}
           onClose={() => setShowBulkCheck(false)}
+          onDone={() => fetchAccounts(true)}
+        />
+      )}
+
+      {showBulkCheckFailed && accounts.filter(a => a.status?.startsWith('error')).length > 0 && (
+        <BulkCheckModal
+          accounts={accounts.filter(a => a.status?.startsWith('error'))}
+          onClose={() => setShowBulkCheckFailed(false)}
           onDone={() => fetchAccounts(true)}
         />
       )}
