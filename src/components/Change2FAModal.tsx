@@ -29,7 +29,6 @@ type Mode = 'choose' | 'auto' | 'manual';
 export default function Change2FAModal({ account, onClose, onSaved, showToast }: Props) {
   const [mode, setMode] = useState<Mode>('auto');
 
-  // ── Automated mode state ──
   const [logs, setLogs] = useState<{ text: string; type: 'log' | 'error' | 'info' | 'success' }[]>([]);
   const [result, setResult] = useState<Change2FAResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -37,7 +36,6 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
   const logEndRef = useRef<HTMLDivElement>(null);
   const startedRef = useRef(false);
 
-  // ── Manual mode state ──
   const [manualSecret, setManualSecret] = useState(account.totpSecret);
   const [savingManual, setSavingManual] = useState(false);
 
@@ -45,7 +43,6 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
-  // Auto-start on mount
   useEffect(() => {
     if (!startedRef.current) {
       startedRef.current = true;
@@ -53,7 +50,6 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
     }
   }, []); // eslint-disable-line
 
-  // ── Automated: run change2fa.js ──
   const startAutoChange = async () => {
     setRunning(true);
     setDone(false);
@@ -90,15 +86,11 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
           if (!line.startsWith('data: ')) continue;
           try {
             const event = JSON.parse(line.slice(6));
-
             if (event.type === 'log') {
               const text = event.message as string;
               const isError = /✗|❌|error/i.test(text) && !/✅/.test(text);
               const isSuccess = /✅/.test(text);
-              setLogs(prev => [...prev, {
-                text,
-                type: isSuccess ? 'success' : isError ? 'error' : 'log',
-              }]);
+              setLogs(prev => [...prev, { text, type: isSuccess ? 'success' : isError ? 'error' : 'log' }]);
             } else if (event.type === 'result') {
               setResult(event.data);
               setLogs(prev => [...prev, { text: '✅ 2FA rotation completed!', type: 'success' }]);
@@ -124,7 +116,6 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
     }
   };
 
-  // ── Manual: just save to sheet ──
   const handleManualSave = async () => {
     if (!manualSecret.trim()) return;
     setSavingManual(true);
@@ -146,7 +137,7 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
     }
   };
 
-  // ── Mode: Choose ──
+  /* ── Mode: Choose ── */
   if (mode === 'choose') {
     return (
       <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -156,51 +147,31 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
             <button className="btn btn-secondary btn-icon" onClick={onClose}>✕</button>
           </div>
           <div className="modal-body">
-            <div style={{ padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 20 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Account</div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--accent)' }}>{account.email}</div>
+            <div className="bg-white/[0.03] border border-white/[0.08] rounded-lg px-3.5 py-2.5 mb-5">
+              <div className="text-[11px] text-slate-600 mb-0.5 uppercase tracking-[0.4px]">Account</div>
+              <div className="font-mono text-sm text-accent">{account.email}</div>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {/* Automated option */}
+            <div className="flex flex-col gap-3">
               <button
                 onClick={() => { setMode('auto'); startAutoChange(); }}
-                style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 14,
-                  padding: '16px 18px', borderRadius: 10,
-                  background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.3)',
-                  cursor: 'pointer', textAlign: 'left', color: 'inherit',
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(99,102,241,0.15)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'rgba(99,102,241,0.08)')}
+                className="flex items-start gap-3.5 p-4 rounded-xl bg-indigo-500/[0.08] border border-indigo-500/30 text-left text-inherit cursor-pointer transition-colors duration-200 hover:bg-indigo-500/[0.15]"
               >
-                <span style={{ fontSize: 28, lineHeight: 1 }}>🤖</span>
+                <span className="text-3xl leading-none">🤖</span>
                 <div>
-                  <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--accent)' }}>Automatic Rotation</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  <div className="font-semibold mb-1 text-accent">Automatic Rotation</div>
+                  <div className="text-xs text-slate-600 leading-relaxed">
                     Logs into Google, navigates the 2FA settings, rotates the secret, and saves the new key — fully automated.
                   </div>
                 </div>
               </button>
-
-              {/* Manual option */}
               <button
                 onClick={() => setMode('manual')}
-                style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 14,
-                  padding: '16px 18px', borderRadius: 10,
-                  background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)',
-                  cursor: 'pointer', textAlign: 'left', color: 'inherit',
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+                className="flex items-start gap-3.5 p-4 rounded-xl bg-white/[0.03] border border-white/[0.08] text-left text-inherit cursor-pointer transition-colors duration-200 hover:bg-white/[0.06]"
               >
-                <span style={{ fontSize: 28, lineHeight: 1 }}>✏️</span>
+                <span className="text-3xl leading-none">✏️</span>
                 <div>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Manual Update</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  <div className="font-semibold mb-1">Manual Update</div>
+                  <div className="text-xs text-slate-600 leading-relaxed">
                     Paste a new TOTP secret directly. Only updates the stored key in the spreadsheet.
                   </div>
                 </div>
@@ -215,7 +186,7 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
     );
   }
 
-  // ── Mode: Auto ──
+  /* ── Mode: Auto ── */
   if (mode === 'auto') {
     return (
       <div className="modal-overlay" onClick={(e) => !running && e.target === e.currentTarget && onClose()}>
@@ -224,36 +195,27 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
             <h2>
               {running
                 ? <><span className="spinner" /> Rotating 2FA...</>
-                : done && result
-                  ? '✅ 2FA Rotated'
-                  : done
-                    ? '❌ Rotation Failed'
-                    : '🔐 2FA Rotation'}
+                : done && result ? '✅ 2FA Rotated'
+                : done ? '❌ Rotation Failed'
+                : '🔐 2FA Rotation'}
             </h2>
             <button className="btn btn-secondary btn-icon" onClick={onClose} disabled={running}>✕</button>
           </div>
-
           <div className="modal-body">
-            <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 16, fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--accent)' }}>
+            <div className="px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-lg mb-4 font-mono text-[12.5px] text-accent">
               {account.email}
             </div>
-
-            {/* Terminal log */}
             <div className="log-terminal">
               {logs.map((log, i) => (
                 <div key={i} className={`log-line ${log.type}`}>{log.text}</div>
               ))}
               <div ref={logEndRef} />
             </div>
-
-            {/* Success result card */}
             {result?.success && (
-              <div className="result-grid" style={{ marginTop: 16 }}>
-                <div className="result-item" style={{ gridColumn: '1 / -1' }}>
+              <div className="result-grid mt-4">
+                <div className="result-item col-span-2">
                   <div className="result-item-label">New TOTP Secret</div>
-                  <div className="result-item-value small" style={{ fontFamily: 'var(--mono)', letterSpacing: 2, fontSize: 13 }}>
-                    {result.newTotpSecret}
-                  </div>
+                  <div className="result-item-value small font-mono tracking-widest text-sm">{result.newTotpSecret}</div>
                 </div>
                 <div className="result-item">
                   <div className="result-item-label">Changed At</div>
@@ -264,17 +226,12 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
               </div>
             )}
           </div>
-
           <div className="modal-footer">
             {done && !running && (
-              <button className="btn btn-secondary" onClick={() => { setDone(false); setResult(null); startAutoChange(); }}>
-                🔄 Retry
-              </button>
+              <button className="btn btn-secondary" onClick={() => { setDone(false); setResult(null); startAutoChange(); }}>🔄 Retry</button>
             )}
             {done && !running && (
-              <button className="btn btn-secondary" onClick={() => setMode('manual')} style={{ opacity: 0.7 }}>
-                ✏️ Manual
-              </button>
+              <button className="btn btn-secondary opacity-70" onClick={() => setMode('manual')}>✏️ Manual</button>
             )}
             <button className="btn btn-primary" onClick={onClose} disabled={running}>
               {running ? 'Running...' : 'Close'}
@@ -285,7 +242,7 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
     );
   }
 
-  // ── Mode: Manual ──
+  /* ── Mode: Manual ── */
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
@@ -294,9 +251,9 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
           <button className="btn btn-secondary btn-icon" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
-          <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Account</div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--accent)' }}>{account.email}</div>
+          <div className="mb-4 px-3.5 py-2.5 bg-white/[0.03] border border-white/[0.08] rounded-lg">
+            <div className="text-[11px] text-slate-600 mb-0.5 uppercase tracking-[0.4px]">Account</div>
+            <div className="font-mono text-sm text-accent">{account.email}</div>
           </div>
           <div className="form-group">
             <label className="form-label">New TOTP Secret (Base32)</label>
@@ -309,7 +266,7 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
               autoFocus
             />
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+          <div className="text-xs text-slate-600 mt-2">
             💡 This only updates the stored secret in the spreadsheet. The account&apos;s Google 2FA settings are left unchanged.
           </div>
         </div>

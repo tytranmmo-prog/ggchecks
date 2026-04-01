@@ -45,7 +45,7 @@ export default function AddAccountModal({ onClose, onSaved }: Props) {
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             {error && (
-              <div style={{ background: 'var(--danger-bg)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 8, padding: '10px 14px', color: 'var(--danger)', fontSize: 13, marginBottom: 16 }}>
+              <div className="bg-danger/10 border border-danger/20 rounded-lg px-3.5 py-2.5 text-danger text-sm mb-4">
                 ⚠️ {error}
               </div>
             )}

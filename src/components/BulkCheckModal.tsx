@@ -81,8 +81,7 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
               setSummary({ completed: ev.completed, errors: ev.errors });
               setDone(true);
               onDone();
-            }
-            else if (ev.type === 'fatal') {
+            } else if (ev.type === 'fatal') {
               setStates(prev => prev.map(s => s.status === 'queued' ? { ...s, status: 'error', error: ev.message } : s));
               setDone(true);
             }
@@ -103,16 +102,16 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
     startBulk();
   }, []); // eslint-disable-line
 
-  const doneCount = states.filter(s => s.status === 'done').length;
-  const errorCount = states.filter(s => s.status === 'error').length;
+  const doneCount    = states.filter(s => s.status === 'done').length;
+  const errorCount   = states.filter(s => s.status === 'error').length;
   const runningCount = states.filter(s => s.status === 'running').length;
-  const progress = Math.round(((doneCount + errorCount) / accounts.length) * 100);
+  const progress     = Math.round(((doneCount + errorCount) / accounts.length) * 100);
 
   const statusIcon = (s: AccountStatus) => {
-    if (s === 'queued') return <span style={{ color: 'var(--text-muted)' }}>⏳</span>;
+    if (s === 'queued')  return <span className="text-slate-600">⏳</span>;
     if (s === 'running') return <span className="spinner" style={{ width: 12, height: 12 }} />;
-    if (s === 'done') return <span style={{ color: 'var(--success)' }}>✅</span>;
-    return <span style={{ color: 'var(--danger)' }}>❌</span>;
+    if (s === 'done')    return <span className="text-success">✅</span>;
+    return <span className="text-danger">❌</span>;
   };
 
   return (
@@ -121,11 +120,9 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
 
         {/* Header */}
         <div className="modal-header">
-          <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h2>
             {running ? <><span className="spinner" /> Bulk Check Running</> : done ? '✅ Bulk Check Complete' : '⚡ Bulk Check'}
-            <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 4 }}>
-              ({accounts.length} accounts)
-            </span>
+            <span className="text-sm font-normal text-slate-600 ml-1">({accounts.length} accounts)</span>
           </h2>
           <button className="btn btn-secondary btn-icon" onClick={onClose} disabled={running}>✕</button>
         </div>
@@ -133,32 +130,30 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
         <div className="modal-body" style={{ padding: '20px 24px' }}>
 
           {/* Status bar */}
-          <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="flex gap-4 mb-4 flex-wrap items-center">
             {chromePort && (
-              <span style={{ fontSize: 12, color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                🟢 Chrome on port {chromePort}
-              </span>
+              <span className="text-xs text-success flex items-center gap-1">🟢 Chrome on port {chromePort}</span>
             )}
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <span className="text-xs text-slate-600">
               🔄 {runningCount} running · ✅ {doneCount} done · ❌ {errorCount} errors · ⏳ {accounts.length - doneCount - errorCount - runningCount} queued
             </span>
           </div>
 
           {/* Progress bar */}
-          <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 6, marginBottom: 20, overflow: 'hidden' }}>
-            <div style={{
-              height: '100%',
-              width: `${progress}%`,
-              background: errorCount > 0
-                ? `linear-gradient(90deg, var(--success) ${Math.round(doneCount / accounts.length * 100)}%, var(--danger) 0%)`
-                : 'var(--success)',
-              borderRadius: 6,
-              transition: 'width 0.4s ease',
-            }} />
+          <div className="h-1.5 bg-white/[0.06] rounded-full mb-5 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-[width] duration-[400ms]"
+              style={{
+                width: `${progress}%`,
+                background: errorCount > 0
+                  ? `linear-gradient(90deg, #34d399 ${Math.round(doneCount / accounts.length * 100)}%, #f87171 0%)`
+                  : '#34d399',
+              }}
+            />
           </div>
 
           {/* Account table */}
-          <div style={{ maxHeight: 400, overflowY: 'auto', borderRadius: 10, border: '1px solid var(--border)' }}>
+          <div className="max-h-[400px] overflow-y-auto rounded-xl border border-white/[0.08]">
             <table style={{ fontSize: 12.5 }}>
               <thead>
                 <tr>
@@ -172,19 +167,19 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
               <tbody>
                 {states.map((s, i) => (
                   <tr key={s.rowIndex}>
-                    <td style={{ color: 'var(--text-muted)', fontSize: 11 }}>{i + 1}</td>
+                    <td className="text-slate-600 text-[11px]">{i + 1}</td>
                     <td className="email-cell" style={{ fontSize: 12 }}>{s.email}</td>
                     <td style={{ textAlign: 'center' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                      <span className="flex items-center justify-center gap-1">
                         {statusIcon(s.status)}
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{s.status}</span>
+                        <span className="text-[11px] text-slate-600 capitalize">{s.status}</span>
                       </span>
                     </td>
-                    <td style={{ fontFamily: 'var(--mono)', color: 'var(--success)', fontSize: 12 }}>
+                    <td className="font-mono text-success text-xs">
                       {s.monthlyCredits ? parseInt(s.monthlyCredits.replace(/,/g, ''), 10).toLocaleString() : '–'}
                     </td>
-                    <td style={{ fontFamily: 'var(--mono)', color: 'var(--accent2)', fontSize: 12 }}>
-                      {s.additionalCredits || (s.error ? <span title={s.error} style={{ color: 'var(--danger)', cursor: 'help' }}>error ⚠</span> : '–')}
+                    <td className="font-mono text-accent2 text-xs">
+                      {s.additionalCredits || (s.error ? <span title={s.error} className="text-danger cursor-help">error ⚠</span> : '–')}
                     </td>
                   </tr>
                 ))}
@@ -194,7 +189,7 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
 
           {/* Summary */}
           {summary && (
-            <div style={{ marginTop: 16, padding: '10px 14px', borderRadius: 8, background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', fontSize: 13, color: 'var(--success)' }}>
+            <div className="mt-4 px-3.5 py-2.5 rounded-lg bg-success/[0.08] border border-success/20 text-sm text-success">
               ✅ Done — {summary.completed} succeeded, {summary.errors} failed out of {accounts.length} accounts
             </div>
           )}

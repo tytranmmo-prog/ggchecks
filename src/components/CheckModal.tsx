@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface Account {
   rowIndex: number;
@@ -53,10 +53,7 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
 
   const startCheck = async () => {
     setRunning(true);
-    setLogs([{
-      text: `🥷 Starting stealth check for ${account.email}...`,
-      type: 'info',
-    }]);
+    setLogs([{ text: `🥷 Starting stealth check for ${account.email}...`, type: 'info' }]);
     setResult(null);
     setDone(false);
 
@@ -93,7 +90,6 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
           const jsonStr = line.slice(6);
           try {
             const event = JSON.parse(jsonStr);
-
             if (event.type === 'log') {
               const text = event.message as string;
               const isError = text.includes('✗') || text.toLowerCase().includes('error');
@@ -126,7 +122,7 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
     }
   };
 
-  // No auto-start — always require manual click so the user can toggle stealth/port first
+  void startedRef;
 
   return (
     <div className="modal-overlay" onClick={(e) => !running && e.target === e.currentTarget && onClose()}>
@@ -144,20 +140,19 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
 
         <div className="modal-body">
           {/* Account info */}
-          <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 16, fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--accent)' }}>
+          <div className="px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-lg mb-4 font-mono text-[12.5px] text-accent">
             {account.email}
           </div>
 
           {/* Terminal log */}
           <div className="log-terminal">
             {logs.map((log, i) => {
-              // Simple URL auto-linker regex for http and local /screenshots/
               const parts = log.text.split(/(https?:\/\/[^\s]+|\/screenshots\/[^\s]+)/g);
               return (
                 <div key={i} className={`log-line ${log.type}`}>
-                  {parts.map((part, j) => 
+                  {parts.map((part, j) =>
                     part.startsWith('http') || part.startsWith('/screenshots/')
-                      ? <a key={j} href={part} target="_blank" rel="noopener noreferrer" style={{ color: '#4da6ff', textDecoration: 'underline' }}>{part}</a>
+                      ? <a key={j} href={part} target="_blank" rel="noopener noreferrer" className="text-[#4da6ff] underline">{part}</a>
                       : part
                   )}
                 </div>
@@ -179,7 +174,7 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
                   <div className="result-item-value">{result.additionalCredits || '–'}</div>
                 </div>
                 {result.additionalCreditsExpiry && (
-                  <div className="result-item" style={{ gridColumn: '1 / -1' }}>
+                  <div className="result-item col-span-2">
                     <div className="result-item-label">Expires</div>
                     <div className="result-item-value small">{result.additionalCreditsExpiry}</div>
                   </div>
@@ -188,7 +183,7 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
 
               {result.memberActivities && result.memberActivities.length > 0 && (
                 <>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 16, marginBottom: 8 }}>
+                  <div className="text-[11px] text-slate-600 uppercase tracking-[0.5px] mt-4 mb-2">
                     Family Members ({result.memberActivities.length})
                   </div>
                   <div className="member-list">
@@ -207,18 +202,10 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
 
         <div className="modal-footer">
           {done && !running && (
-            <button className="btn btn-secondary" onClick={() => { setDone(false); startCheck(); }}>
-              🔄 Run Again
-            </button>
+            <button className="btn btn-secondary" onClick={() => { setDone(false); startCheck(); }}>🔄 Run Again</button>
           )}
-          {/* Start button — always visible before a run */}
           {!running && !done && (
-            <button
-              className="btn btn-primary"
-              onClick={startCheck}
-            >
-              {'🥷 Start Stealth Check'}
-            </button>
+            <button className="btn btn-primary" onClick={startCheck}>🥷 Start Stealth Check</button>
           )}
           <button className="btn btn-secondary" onClick={onClose} disabled={running}>
             {running ? 'Running...' : 'Close'}

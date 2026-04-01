@@ -155,23 +155,24 @@ export default function HomePage() {
   }
 
   return (
-    <div className="app-container">
-      {/* Header */}
-      <div className="app-header">
-        <div className="app-logo">
-          <div className="app-logo-icon">🤖</div>
+    <div>
+
+      {/* Sticky Header — full viewport width */}
+      <div className="sticky top-0 z-50 bg-[rgba(10,13,20,0.82)] backdrop-blur-2xl
+                      border-b border-white/[0.07] shadow-[0_4px_24px_rgba(0,0,0,0.35)]">
+        <div className="max-w-[1400px] mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-gradient-to-br from-accent to-accent2 rounded-xl flex items-center justify-center text-xl shadow-[0_0_20px_rgba(79,142,247,0.3)]">
+            🤖
+          </div>
           <div>
-            <h1>GG Checks</h1>
-            <p>Google AI Credit Manager</p>
+            <h1 className="text-xl font-bold text-slate-100 tracking-tight">GG Checks</h1>
+            <p className="text-xs text-slate-600 mt-px">Google AI Credit Manager</p>
           </div>
         </div>
-        <div className="header-actions">
-          <button
-            className="btn btn-secondary"
-            onClick={() => fetchAccounts(true)}
-            disabled={refreshing}
-            title="Refresh accounts"
-          >
+
+        <div className="flex gap-2.5 items-center flex-wrap">
+          <button className="btn btn-secondary" onClick={() => fetchAccounts(true)} disabled={refreshing} title="Refresh accounts">
             <span className={refreshing ? 'spinning' : ''}>↻</span>
             {refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
@@ -215,44 +216,34 @@ export default function HomePage() {
             ➕ Add Account
           </button>
         </div>
+        </div>
       </div>
 
+      {/* Page content */}
+      <div className="max-w-[1400px] mx-auto px-6 pb-8">
+
       {/* Stats */}
-      <div className="stats-bar">
-        <div className="stat-card">
-          <div className="stat-icon">👥</div>
-          <div className="stat-info">
-            <div className="stat-value">{accounts.length}</div>
-            <div className="stat-label">Total Accounts</div>
+      <div className="flex gap-4 mt-6 mb-6 flex-wrap">
+        {[
+          { icon: '👥', value: accounts.length, label: 'Total Accounts' },
+          { icon: '✅', value: totalChecked, label: 'Checked OK' },
+          { icon: '💎', value: totalCredits.toLocaleString(), label: 'Total Credits' },
+          { icon: '⚠️', value: accounts.filter(a => a.status?.startsWith('error')).length, label: 'Errors' },
+        ].map(s => (
+          <div key={s.label} className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-5 py-4 flex items-center gap-3 flex-1 min-w-[160px] backdrop-blur-sm transition-[border-color] duration-200 hover:border-white/15">
+            <div className="text-[22px] w-10 h-10 bg-white/[0.04] rounded-lg flex items-center justify-center">{s.icon}</div>
+            <div className="flex-1">
+              <div className="text-[22px] font-bold text-slate-100">{s.value}</div>
+              <div className="text-[11px] text-slate-600 uppercase tracking-[0.5px] mt-px">{s.label}</div>
+            </div>
           </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon">✅</div>
-          <div className="stat-info">
-            <div className="stat-value">{totalChecked}</div>
-            <div className="stat-label">Checked OK</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon">💎</div>
-          <div className="stat-info">
-            <div className="stat-value">{totalCredits.toLocaleString()}</div>
-            <div className="stat-label">Total Credits</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon">⚠️</div>
-          <div className="stat-info">
-            <div className="stat-value">{accounts.filter(a => a.status?.startsWith('error')).length}</div>
-            <div className="stat-label">Errors</div>
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* Table */}
-      <div className="table-card">
-        <div className="table-toolbar">
-          <span className="table-title">Accounts — {filtered.length} shown</span>
+      <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl overflow-hidden backdrop-blur-sm">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08] gap-3 flex-wrap">
+          <span className="text-sm font-semibold text-slate-100">Accounts — {filtered.length} shown</span>
           <input
             className="search-input"
             placeholder="🔍 Search by email..."
@@ -262,23 +253,23 @@ export default function HomePage() {
         </div>
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
+          <div className="text-center py-16 text-slate-600">
             <div className="spinner" style={{ width: 28, height: 28, margin: '0 auto 12px' }} />
-            <div>Loading accounts from Google Sheets...</div>
+            <div>Loading accounts...</div>
           </div>
         ) : error ? (
-          <div style={{ padding: '40px 24px', textAlign: 'center' }}>
-            <div style={{ color: 'var(--danger)', marginBottom: 8, fontSize: 16 }}>⚠️ {error}</div>
+          <div className="px-6 py-10 text-center">
+            <div className="text-danger mb-2 text-base">⚠️ {error}</div>
             <button className="btn btn-secondary" onClick={() => fetchAccounts()}>Retry</button>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">📭</div>
-            <h3>{search ? 'No matches found' : 'No accounts yet'}</h3>
-            <p>{search ? 'Try a different search' : 'Add your first Google account to get started'}</p>
+          <div className="text-center py-16 px-5 text-slate-600">
+            <div className="text-5xl mb-3">📭</div>
+            <h3 className="text-base text-slate-400 mb-1.5">{search ? 'No matches found' : 'No accounts yet'}</h3>
+            <p className="text-sm">{search ? 'Try a different search' : 'Add your first Google account to get started'}</p>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <div className="overflow-x-auto">
             <table>
               <thead>
                 <tr>
@@ -328,7 +319,7 @@ export default function HomePage() {
                         }}
                       />
                     </td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{idx + 1}</td>
+                    <td className="text-slate-600 text-xs">{idx + 1}</td>
                     <td className="email-cell">{account.email}</td>
                     <td>
                       {account.monthlyCredits
@@ -337,52 +328,35 @@ export default function HomePage() {
                     </td>
                     <td>
                       {account.additionalCredits
-                        ? <span className="credit-value" style={{ color: 'var(--accent2)' }}>{account.additionalCredits}</span>
+                        ? <span className="credit-value text-accent2">{account.additionalCredits}</span>
                         : <span className="credit-empty">–</span>}
                     </td>
-                    <td className="mono-cell" style={{ fontSize: 11 }}>{account.additionalCreditsExpiry || '–'}</td>
+                    <td className="mono-cell text-[11px]">{account.additionalCreditsExpiry || '–'}</td>
                     <td>
                       {account.memberActivities
-                        ? <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--mono)' }}>
-                            {account.memberActivities.split(' | ').length} members
-                          </span>
+                        ? <span className="text-[11px] text-slate-400 font-mono">{account.memberActivities.split(' | ').length} members</span>
                         : <span className="credit-empty">–</span>}
                     </td>
-                    <td className="mono-cell" style={{ fontSize: 11 }}>{formatDate(account.lastChecked)}</td>
+                    <td className="mono-cell text-[11px]">{formatDate(account.lastChecked)}</td>
                     <td>{statusBadge(account.status)}</td>
                     <td>
                       <div className="action-cell">
                         {account.status && account.status.startsWith('error') && (
                           <a
                             href={`/screenshots/${account.email.replace('@', '_at_')}.png`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            target="_blank" rel="noopener noreferrer"
                             className="btn btn-secondary btn-icon"
                             title="View Error Screenshot"
                             style={{ textDecoration: 'none' }}
-                          >
-                            📸
-                          </a>
+                          >📸</a>
                         )}
-                        <button
-                          className="btn btn-success"
-                          onClick={() => setCheckTarget(account)}
-                          title="Check credits"
-                        >
-                          ⚡ Check
-                        </button>
-                        <button
-                          className="btn btn-warning"
-                          onClick={() => setTwoFATarget(account)}
-                          title="Change 2FA secret"
-                        >
-                          🔐 2FA
-                        </button>
+                        <button className="btn btn-success" onClick={() => setCheckTarget(account)} title="Check credits">⚡ Check</button>
+                        <button className="btn btn-warning" onClick={() => setTwoFATarget(account)} title="Change 2FA secret">🔐 2FA</button>
                         <button
                           className="btn btn-secondary btn-icon"
                           onClick={() => handleResetProfile(account)}
                           disabled={resettingProfile === account.rowIndex}
-                          title="Reset Chrome profile — forces full re-login next check"
+                          title="Reset Chrome profile"
                         >
                           {resettingProfile === account.rowIndex ? <span className="spinner" /> : '🧹'}
                         </button>
@@ -406,46 +380,20 @@ export default function HomePage() {
 
       {/* Modals */}
       {checkTarget && (
-        <CheckModal
-          account={checkTarget}
-          onClose={() => setCheckTarget(null)}
-          onDone={() => fetchAccounts(true)}
-          showToast={showToast}
-        />
+        <CheckModal account={checkTarget} onClose={() => setCheckTarget(null)} onDone={() => fetchAccounts(true)} showToast={showToast} />
       )}
-
       {twoFATarget && (
-        <Change2FAModal
-          account={twoFATarget}
-          onClose={() => setTwoFATarget(null)}
-          onSaved={() => fetchAccounts(true)}
-          showToast={showToast}
-        />
+        <Change2FAModal account={twoFATarget} onClose={() => setTwoFATarget(null)} onSaved={() => fetchAccounts(true)} showToast={showToast} />
       )}
-
       {showAddModal && (
-        <AddAccountModal
-          onClose={() => setShowAddModal(false)}
-          onSaved={() => fetchAccounts(true)}
-        />
+        <AddAccountModal onClose={() => setShowAddModal(false)} onSaved={() => fetchAccounts(true)} />
       )}
-
       {showBulkCheck && accounts.length > 0 && (
-        <BulkCheckModal
-          accounts={accounts}
-          onClose={() => setShowBulkCheck(false)}
-          onDone={() => fetchAccounts(true)}
-        />
+        <BulkCheckModal accounts={accounts} onClose={() => setShowBulkCheck(false)} onDone={() => fetchAccounts(true)} />
       )}
-
       {showBulkCheckFailed && accounts.filter(a => a.status?.startsWith('error')).length > 0 && (
-        <BulkCheckModal
-          accounts={accounts.filter(a => a.status?.startsWith('error'))}
-          onClose={() => setShowBulkCheckFailed(false)}
-          onDone={() => fetchAccounts(true)}
-        />
+        <BulkCheckModal accounts={accounts.filter(a => a.status?.startsWith('error'))} onClose={() => setShowBulkCheckFailed(false)} onDone={() => fetchAccounts(true)} />
       )}
-
       {showBulkCheckSelected && selectedRows.size > 0 && (
         <BulkCheckModal
           accounts={accounts.filter(a => selectedRows.has(a.rowIndex))}
@@ -453,22 +401,19 @@ export default function HomePage() {
           onDone={() => { fetchAccounts(true); setSelectedRows(new Set()); }}
         />
       )}
-
       {showSettings && (
-        <SettingsModal
-          onClose={() => setShowSettings(false)}
-          showToast={showToast}
-        />
+        <SettingsModal onClose={() => setShowSettings(false)} showToast={showToast} />
       )}
 
       {/* Toasts */}
-      <div style={{ position: 'fixed', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 200 }}>
+      <div className="fixed bottom-6 right-6 flex flex-col gap-2 z-[200]">
         {toasts.map(t => (
           <div key={t.id} className={`toast toast-${t.type}`}>
             {t.type === 'success' ? '✅' : '❌'} {t.message}
           </div>
         ))}
       </div>
+      </div>{/* /content container */}
     </div>
   );
 }
