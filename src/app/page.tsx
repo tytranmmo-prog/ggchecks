@@ -38,10 +38,12 @@ export default function HomePage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkCheck, setShowBulkCheck] = useState(false);
   const [showBulkCheckFailed, setShowBulkCheckFailed] = useState(false);
+  const [showBulkCheckSelected, setShowBulkCheckSelected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
   const [resettingProfile, setResettingProfile] = useState<number | null>(null);
   const [resettingAll, setResettingAll] = useState(false);
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
 
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -200,6 +202,15 @@ export default function HomePage() {
           >
             ⚡ Check All ({accounts.length})
           </button>
+          {selectedRows.size > 0 && (
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowBulkCheckSelected(true)}
+              title="Check only selected accounts"
+            >
+              ☑ Check Selected ({selectedRows.size})
+            </button>
+          )}
           <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
             ➕ Add Account
           </button>
@@ -271,6 +282,24 @@ export default function HomePage() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: 36, textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      title="Select all visible rows"
+                      checked={filtered.length > 0 && filtered.every(a => selectedRows.has(a.rowIndex))}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setSelectedRows(prev => new Set([...prev, ...filtered.map(a => a.rowIndex)]));
+                        } else {
+                          setSelectedRows(prev => {
+                            const next = new Set(prev);
+                            filtered.forEach(a => next.delete(a.rowIndex));
+                            return next;
+                          });
+                        }
+                      }}
+                    />
+                  </th>
                   <th>#</th>
                   <th>Email</th>
                   <th>Monthly Credits</th>
@@ -284,7 +313,21 @@ export default function HomePage() {
               </thead>
               <tbody>
                 {filtered.map((account, idx) => (
-                  <tr key={account.rowIndex}>
+                  <tr key={account.rowIndex} className={selectedRows.has(account.rowIndex) ? 'row-selected' : ''}>
+                    <td style={{ textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedRows.has(account.rowIndex)}
+                        onChange={e => {
+                          setSelectedRows(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(account.rowIndex);
+                            else next.delete(account.rowIndex);
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{idx + 1}</td>
                     <td className="email-cell">{account.email}</td>
                     <td>
@@ -400,6 +443,14 @@ export default function HomePage() {
           accounts={accounts.filter(a => a.status?.startsWith('error'))}
           onClose={() => setShowBulkCheckFailed(false)}
           onDone={() => fetchAccounts(true)}
+        />
+      )}
+
+      {showBulkCheckSelected && selectedRows.size > 0 && (
+        <BulkCheckModal
+          accounts={accounts.filter(a => selectedRows.has(a.rowIndex))}
+          onClose={() => setShowBulkCheckSelected(false)}
+          onDone={() => { fetchAccounts(true); setSelectedRows(new Set()); }}
         />
       )}
 
