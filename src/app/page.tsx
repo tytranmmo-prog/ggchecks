@@ -39,6 +39,7 @@ export default function HomePage() {
   const [showBulkCheck, setShowBulkCheck] = useState(false);
   const [showBulkCheckFailed, setShowBulkCheckFailed] = useState(false);
   const [showBulkCheckSelected, setShowBulkCheckSelected] = useState(false);
+  const [showBulkCheckPending, setShowBulkCheckPending] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
   const [resettingProfile, setResettingProfile] = useState<number | null>(null);
@@ -186,6 +187,14 @@ export default function HomePage() {
             title="Delete all Chrome profiles — every account re-authenticates on next check"
           >
             {resettingAll ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Resetting...</> : '🧹 Reset All Profiles'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowBulkCheckPending(true)}
+            disabled={accounts.filter(a => !a.status || a.status === 'pending').length === 0}
+            title="Check only pending accounts"
+          >
+            ⏳ Check Pending ({accounts.filter(a => !a.status || a.status === 'pending').length})
           </button>
           <button
             className="btn btn-warning"
@@ -393,6 +402,9 @@ export default function HomePage() {
       )}
       {showBulkCheckFailed && accounts.filter(a => a.status?.startsWith('error')).length > 0 && (
         <BulkCheckModal accounts={accounts.filter(a => a.status?.startsWith('error'))} onClose={() => setShowBulkCheckFailed(false)} onDone={() => fetchAccounts(true)} />
+      )}
+      {showBulkCheckPending && accounts.filter(a => !a.status || a.status === 'pending').length > 0 && (
+        <BulkCheckModal accounts={accounts.filter(a => !a.status || a.status === 'pending')} onClose={() => setShowBulkCheckPending(false)} onDone={() => fetchAccounts(true)} />
       )}
       {showBulkCheckSelected && selectedRows.size > 0 && (
         <BulkCheckModal
