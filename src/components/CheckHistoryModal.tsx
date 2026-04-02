@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 
 interface MemberActivity {
   name: string;
+  email?: string | null;
   credit: number;
 }
 
@@ -122,49 +123,76 @@ export default function CheckHistoryModal({ account, onClose }: Props) {
                   <thead>
                     <tr>
                       <th style={{ width: 36 }}>#</th>
+                      <th>Member Email</th>
+                      <th>Member Name</th>
+                      <th>Member Credit</th>
                       <th>Checked At</th>
                       <th>Monthly Credits</th>
                       <th>Additional</th>
                       <th>Expiry</th>
-                      <th>Members</th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((item, idx) => (
-                      <tr key={item.id}>
-                        <td className="text-slate-600 text-xs">{idx + 1}</td>
-                        <td className="mono-cell text-[11px]">{fmt(item.createdAt)}</td>
-                        <td>
-                          {parseCredits(item.monthlyCredits)
-                            ? <span className="credit-value">{parseCredits(item.monthlyCredits)}</span>
-                            : <span className="credit-empty">–</span>}
-                        </td>
-                        <td>
-                          {item.additionalCredits
-                            ? <span className="credit-value text-accent2">{item.additionalCredits}</span>
-                            : <span className="credit-empty">–</span>}
-                        </td>
-                        <td className="mono-cell text-[11px]">{item.additionalCreditsExpiry || '–'}</td>
-                        <td>
-                          {Array.isArray(item.memberActivities) && item.memberActivities.length > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                              {item.memberActivities.map((m, mi) => (
-                                <div key={mi} style={{ fontSize: 11, color: 'var(--slate-400)', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                                  <span style={{ color: 'var(--slate-300)' }}>{m.name}</span>
-                                  <span style={{ color: 'var(--accent)', marginLeft: 6 }}>
-                                    {Number(m.credit).toLocaleString()} cr
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="credit-empty">–</span>
-                          )}
-                        </td>
-                        <td>{statusBadge(item.status)}</td>
-                      </tr>
-                    ))}
+                    {items.map((item, idx) => {
+                      const members = Array.isArray(item.memberActivities) && item.memberActivities.length > 0 
+                        ? item.memberActivities 
+                        : null;
+                      const rowSpan = members ? members.length : 1;
+
+                      return (
+                        <Fragment key={item.id}>
+                          <tr>
+                            <td className="text-slate-600 text-xs" rowSpan={rowSpan}>{idx + 1}</td>
+                            {members ? (
+                              <>
+                                <td style={{ fontSize: 11, color: 'var(--slate-500)', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                  {members[0].email || 'No email'}
+                                </td>
+                                <td style={{ fontSize: 11, color: 'var(--slate-300)', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                  {members[0].name || 'Unknown'}
+                                </td>
+                                <td>
+                                  <span className="credit-value">{Number(members[0].credit).toLocaleString()}</span>
+                                </td>
+                              </>
+                            ) : (
+                              <td colSpan={3}>
+                                <span className="credit-empty">–</span>
+                              </td>
+                            )}
+                            <td className="mono-cell text-[11px]" rowSpan={rowSpan}>{fmt(item.createdAt)}</td>
+                            <td rowSpan={rowSpan}>
+                              {parseCredits(item.monthlyCredits)
+                                ? <span className="credit-value">{parseCredits(item.monthlyCredits)}</span>
+                                : <span className="credit-empty">–</span>}
+                            </td>
+                            <td rowSpan={rowSpan}>
+                              {item.additionalCredits
+                                ? <span className="credit-value text-accent2">{item.additionalCredits}</span>
+                                : <span className="credit-empty">–</span>}
+                            </td>
+                            <td className="mono-cell text-[11px]" rowSpan={rowSpan}>{item.additionalCreditsExpiry || '–'}</td>
+                            <td rowSpan={rowSpan}>{statusBadge(item.status)}</td>
+                          </tr>
+                          {members && members.slice(1).map((m, mi) => (
+                            <tr key={`${item.id}-m-${mi}`}>
+                              <>
+                                <td style={{ fontSize: 11, color: 'var(--slate-500)', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                  {m.email || 'No email'}
+                                </td>
+                                <td style={{ fontSize: 11, color: 'var(--slate-300)', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                  {m.name || 'Unknown'}
+                                </td>
+                                <td>
+                                  <span className="credit-value">{Number(m.credit).toLocaleString()}</span>
+                                </td>
+                              </>
+                            </tr>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

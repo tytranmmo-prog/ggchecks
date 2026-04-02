@@ -3,16 +3,25 @@
  * Usage: bun checkOne.ts '{"email":"..","password":"..","totpSecret":".."}'
  * Outputs: JSON result to stdout
  *
+ * Flow:
+ *   1. Login (via Playwright or CDP)
+ *   2. Call getFamilyMembers(page) — builds name→email map (Playwright still connected)
+ *   3. Navigate to activity page and scrape credits
+ *   4. Merge email into each memberActivity
+ *   5. Output enriched JSON
+ *
  * CDP pool mode (when debugPort is provided):
- *   Phase 1 — Playwright connects ONLY to handle login (if session is missing).
- *             Playwright is disconnected the moment login is confirmed so
- *             navigator.webdriver is no longer asserted on subsequent pages.
+ *   Phase 1 — Playwright connects for login + family member fetch.
+ *             Playwright is disconnected afterwards so navigator.webdriver
+ *             is no longer asserted on subsequent pages.
  *   Phase 2 — Navigation + scraping done via raw CDP WebSocket with no
  *             Playwright fingerprint on the page.
  */
 
 import { writeFileSync, mkdirSync } from 'fs';
-import { sleep, log, createBrowser, createBrowserCDP, googleLogin } from './google-auth';
+import { sleep, log, createBrowser, createBrowserCDP, googleLogin, fillAndSubmitTOTP } from './google-auth';
+import { getFamilyMembers } from './checkFamily';
+import type { FamilyMember } from './checkFamily';
 
 const ACTIVITY_URL   = 'https://one.google.com/ai/activity?pli=1&g1_landing_page=0';
 const TIMEOUT        = 60_000;
@@ -23,54 +32,52 @@ const SCREENSHOT_DIR = process.env.SCREENSHOT_DIR ?? `${process.cwd()}/public/sc
 // ──────────────────────────────────────────────
 
 interface MemberActivity {
-  name: string;
-  credit: number;
+  name:    string;
+  email:   string | null;   // enriched via getFamilyMembers
+  credit:  number;
   checkAt: string;
 }
 
 interface ActivityData {
-  monthlyCredits: string | null;
-  additionalCredits: string | null;
+  monthlyCredits:          string | null;
+  additionalCredits:       string | null;
   additionalCreditsExpiry: string | null;
-  ownActivity: unknown[];
-  memberActivities: { name: string; credit: number }[];
+  ownActivity:             unknown[];
+  memberActivities:        { name: string; credit: number }[];
 }
 
 interface CheckResult {
-  success: true;
-  account: string;
-  checkAt: string;
-  monthlyCredits: string | null;
-  additionalCredits: string | null;
+  success:                 true;
+  account:                 string;
+  checkAt:                 string;
+  monthlyCredits:          string | null;
+  additionalCredits:       string | null;
   additionalCreditsExpiry: string | null;
-  memberActivities: MemberActivity[];
+  memberActivities:        MemberActivity[];
+  familyMembers:           FamilyMember[];   // full member roster with emails
 }
 
 interface CheckError {
-  success: false;
-  account: string;
-  error: string;
-  /** Absolute path to the screenshot taken at the time of failure, if available. */
-  screenshotPath?: string;
+  success:          false;
+  account:          string;
+  error:            string;
+  screenshotPath?:  string;
 }
 
-// ──────────────────────────────────────────────
 // ──────────────────────────────────────────────
 // Screenshot helpers
 // ──────────────────────────────────────────────
 
 function screenshotPath(email: string): string {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
-  // Overwrite the same file so the frontend always knows where to find the latest screenshot
   return `${SCREENSHOT_DIR}/${email.replace('@', '_at_')}.png`;
 }
 
-/** Capture via raw CDP Page.captureScreenshot — works when Playwright is disconnected. */
 async function cdpScreenshot(port: number, email: string): Promise<string | undefined> {
   try {
     const wsUrl = await getPageWsUrl(port);
-    const data = await cdpSend<{ data: string }>(wsUrl, 'Page.captureScreenshot', { format: 'png' });
-    const path = screenshotPath(email);
+    const data  = await cdpSend<{ data: string }>(wsUrl, 'Page.captureScreenshot', { format: 'png' });
+    const path  = screenshotPath(email);
     writeFileSync(path, Buffer.from(data.data, 'base64'));
     log(`Screenshot saved: ${path}`);
     return path;
@@ -80,13 +87,12 @@ async function cdpScreenshot(port: number, email: string): Promise<string | unde
   }
 }
 
-// Raw CDP helpers
-// Used post-login so Playwright is disconnected
-// and navigator.webdriver is not asserted.
+// ──────────────────────────────────────────────
+// Raw CDP helpers (used in pool mode only)
 // ──────────────────────────────────────────────
 
 interface CDPTarget {
-  type: string;
+  type:                string;
   webSocketDebuggerUrl: string;
 }
 
@@ -97,12 +103,11 @@ async function getPageWsUrl(port: number): Promise<string> {
   return t.webSocketDebuggerUrl;
 }
 
-/** Send one CDP command, return result value. */
 function cdpSend<T>(wsUrl: string, method: string, params: object = {}): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const ws = new WebSocket(wsUrl);
+    const ws    = new WebSocket(wsUrl);
     const timer = setTimeout(() => { ws.close(); reject(new Error(`CDP timeout: ${method}`)); }, 30_000);
-    ws.onopen  = () => ws.send(JSON.stringify({ id: 1, method, params }));
+    ws.onopen    = () => ws.send(JSON.stringify({ id: 1, method, params }));
     ws.onmessage = (e: MessageEvent) => {
       const msg = JSON.parse(e.data as string);
       if (msg.id !== 1) return;
@@ -128,12 +133,12 @@ async function cdpEval<T>(port: number, expression: string): Promise<T> {
   return cdpSend<T>(ws, 'Runtime.evaluate', {
     expression,
     returnByValue: true,
-    awaitPromise: true,
+    awaitPromise:  true,
   });
 }
 
 // ──────────────────────────────────────────────
-// Scrape logic (plain JS string, runtime-safe)
+// Activity page scraper (plain JS string)
 // ──────────────────────────────────────────────
 
 const SCRAPE_JS = `(function() {
@@ -176,7 +181,7 @@ const SCRAPE_JS = `(function() {
 })()`;
 
 async function scrapeActivityPage(port: number): Promise<ActivityData> {
-  log('Waiting for activity page...');
+  log('Waiting for activity page to load...');
   const deadline = Date.now() + TIMEOUT;
   while (Date.now() < deadline) {
     const text = await cdpEval<string>(port, 'document.body.innerText');
@@ -189,21 +194,62 @@ async function scrapeActivityPage(port: number): Promise<ActivityData> {
 }
 
 // ──────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────
+
+/** Merge email into raw memberActivities, ensuring all family members are included with at least 0 credit. */
+function enrichActivities(
+  raw: { name: string; credit: number }[],
+  familyMembers: FamilyMember[],
+  checkAt: string,
+): MemberActivity[] {
+  const result: MemberActivity[] = [];
+  const processedNames = new Set<string>();
+
+  const rawMap = new Map<string, number>();
+  for (const r of raw) {
+    if (r.name) rawMap.set(r.name.trim(), r.credit);
+  }
+
+  for (const m of familyMembers) {
+    const name = m.name?.trim() || m.email || 'Unknown';
+    const email = m.email?.trim() || null;
+    const credit = m.name ? (rawMap.get(m.name.trim()) ?? 0) : 0;
+    
+    result.push({ name, email, credit, checkAt });
+    if (m.name) processedNames.add(m.name.trim());
+  }
+
+  for (const r of raw) {
+    if (r.name && !processedNames.has(r.name.trim())) {
+      result.push({
+        name: r.name.trim(),
+        email: null,
+        credit: r.credit,
+        checkAt
+      });
+    }
+  }
+
+  return result;
+}
+
+// ──────────────────────────────────────────────
 // MAIN
 // ──────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const accountArg = process.env.ACCOUNT_JSON || process.argv[2];
   if (!accountArg) {
-    console.error('Usage: bun checkOne.ts \'{"email":"...","password":"...","totpSecret":"..."}\' ');
+    console.error("Usage: bun checkOne.ts '{\"email\":\"...\",\"password\":\"...\",\"totpSecret\":\"...\"}'");
     process.exit(1);
   }
 
   const account = JSON.parse(accountArg) as {
-    email: string;
-    password: string;
-    totpSecret: string;
-    debugPort?: number;
+    email:        string;
+    password:     string;
+    totpSecret:   string;
+    debugPort?:   number;
   };
   const { email, password, totpSecret, debugPort } = account;
 
@@ -212,37 +258,64 @@ async function main(): Promise<void> {
     const { browser, context, page } = await createBrowser();
     let screenshotP: string | undefined;
     try {
+      // ── 1. Login ────────────────────────────────────────────────────────────
       await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
       await sleep(1500);
       if (page.url().includes('accounts.google.com')) {
         await googleLogin(page, email, password, totpSecret);
-        await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
-        await sleep(2000);
+        await sleep(1000);
       }
+
+      // ── 2. Fetch family members while still authenticated ───────────────────
+      log('Fetching family members...');
+      const familyMembers = await getFamilyMembers(page);
+
+      // ── 3. Navigate to activity page and scrape ─────────────────────────────
+      log('Navigating to activity page...');
+      await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+      await sleep(2000);
+
+      // Google may issue a TOTP re-challenge when crossing from myaccount → one.google.com
+      if (page.url().includes('accounts.google.com')) {
+        log('TOTP re-challenge after family fetch — re-authenticating...');
+        await fillAndSubmitTOTP(page, totpSecret, 'activity-re-auth');
+        await sleep(1500);
+        // If still stuck, navigate again
+        if (page.url().includes('accounts.google.com')) {
+          await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+          await sleep(2000);
+        }
+      }
+
       const activityData = await page.evaluate(SCRAPE_JS) as ActivityData;
+
+      // ── 4. Build enriched result ─────────────────────────────────────────────
       const checkAt = new Date().toISOString();
       const result: CheckResult = {
-        success: true, account: email, checkAt,
-        monthlyCredits: activityData.monthlyCredits,
-        additionalCredits: activityData.additionalCredits,
+        success:                 true,
+        account:                 email,
+        checkAt,
+        monthlyCredits:          activityData.monthlyCredits,
+        additionalCredits:       activityData.additionalCredits,
         additionalCreditsExpiry: activityData.additionalCreditsExpiry,
-        memberActivities: activityData.memberActivities.map(m => ({ ...m, checkAt })),
+        memberActivities:        enrichActivities(activityData.memberActivities, familyMembers, checkAt),
+        familyMembers,
       };
       process.stdout.write(JSON.stringify(result) + '\n');
       log(`Done. Monthly: ${result.monthlyCredits}`);
+
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       log(`Error: ${error}`);
-      // Playwright is still connected — capture page state before closing
       try {
         const path = screenshotPath(email);
         await page.screenshot({ path, fullPage: true });
         screenshotP = path;
         log(`Screenshot saved: ${path}`);
-      } catch (ssErr) {
-        log(`Screenshot failed: ${ssErr}`);
-      }
-      process.stdout.write(JSON.stringify({ success: false, account: email, error, screenshotPath: screenshotP } as CheckError) + '\n');
+      } catch (ssErr) { log(`Screenshot failed: ${ssErr}`); }
+      process.stdout.write(
+        JSON.stringify({ success: false, account: email, error, screenshotPath: screenshotP } as CheckError) + '\n'
+      );
     } finally {
       await context.close();
       await browser.close();
@@ -252,11 +325,14 @@ async function main(): Promise<void> {
 
   // ── CDP pool mode ──────────────────────────────────────────────────────────
   //
-  // Phase 1: Playwright — login only, then immediately disconnected.
-  // Phase 2: Raw CDP   — navigate + scrape, no automation fingerprint.
+  // Phase 1: Playwright — login + family member fetch, then disconnect.
+  //          While Playwright is alive we grab the full family roster.
+  // Phase 2: Raw CDP   — navigate + scrape activity page (no automation fingerprint).
+
+  let familyMembers: FamilyMember[] = [];
 
   try {
-    // ── Phase 1 (scoped block — Playwright lives only here) ──────────────────
+    // ── Phase 1 ───────────────────────────────────────────────────────────────
     {
       const { browser, page } = await createBrowserCDP(debugPort);
       try {
@@ -271,25 +347,28 @@ async function main(): Promise<void> {
         } else {
           log('Session cache hit — login skipped.');
         }
+
+        // Fetch family members while Playwright is still connected
+        log('Fetching family members (Phase 1)...');
+        familyMembers = await getFamilyMembers(page);
+        log(`Got ${familyMembers.length} family member(s).`);
+
       } catch (loginErr) {
-        // Playwright still connected — grab the page before we disconnect
         try {
           const path = screenshotPath(email);
           await page.screenshot({ path, fullPage: true });
           log(`Login error screenshot: ${path}`);
         } catch { /* non-fatal */ }
-        throw loginErr; // re-throw so outer catch handles the error output
+        throw loginErr;
       } finally {
-        // Disconnect Playwright. Chrome stays alive; cookies/session persist.
-        // navigator.webdriver will no longer be asserted on subsequent page loads.
-        await browser.close();
+        await browser.close(); // Disconnect — Chrome stays alive, session persists
         log('Playwright disconnected — switching to raw CDP.');
       }
     }
 
-    await sleep(500); // let Chrome settle
+    await sleep(500);
 
-    // ── Phase 2: raw CDP ─────────────────────────────────────────────────────
+    // ── Phase 2: Raw CDP ──────────────────────────────────────────────────────
     await cdpNavigate(debugPort, ACTIVITY_URL);
     await sleep(2000);
 
@@ -299,16 +378,17 @@ async function main(): Promise<void> {
     }
 
     const activityData = await scrapeActivityPage(debugPort);
-    const checkAt = new Date().toISOString();
+    const checkAt      = new Date().toISOString();
 
     const result: CheckResult = {
-      success: true,
-      account: email,
+      success:                 true,
+      account:                 email,
       checkAt,
-      monthlyCredits: activityData.monthlyCredits,
-      additionalCredits: activityData.additionalCredits,
+      monthlyCredits:          activityData.monthlyCredits,
+      additionalCredits:       activityData.additionalCredits,
       additionalCreditsExpiry: activityData.additionalCreditsExpiry,
-      memberActivities: activityData.memberActivities.map(m => ({ ...m, checkAt })),
+      memberActivities:        enrichActivities(activityData.memberActivities, familyMembers, checkAt),
+      familyMembers,
     };
 
     process.stdout.write(JSON.stringify(result) + '\n');
@@ -317,11 +397,11 @@ async function main(): Promise<void> {
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     log(`Error: ${error}`);
-    // Playwright is already disconnected at this point — use raw CDP
     const screenshotP = await cdpScreenshot(debugPort, email);
-    process.stdout.write(JSON.stringify({ success: false, account: email, error, screenshotPath: screenshotP } as CheckError) + '\n');
+    process.stdout.write(
+      JSON.stringify({ success: false, account: email, error, screenshotPath: screenshotP } as CheckError) + '\n'
+    );
   }
-  // Chrome process stays alive — persistent pool reuses it for the next check.
 }
 
 main().catch(err => {

@@ -12,6 +12,7 @@ import {
 
 export interface MemberActivity {
   name: string;
+  email?: string | null;
   credit: number;
 }
 
@@ -23,6 +24,7 @@ export const serviceAccounts = pgTable('service_accounts', {
   password:   text('password').notNull(),
   totpSecret: text('totp_secret').notNull(),
   notes:      text('notes').notNull().default(''),
+  proxy:      text('proxy'),
   createdAt:  timestamp('created_at',  { withTimezone: true }).defaultNow().notNull(),
   updatedAt:  timestamp('updated_at',  { withTimezone: true }).defaultNow().notNull(),
 });

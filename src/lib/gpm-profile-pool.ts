@@ -224,24 +224,26 @@ export class GpmProfilePool implements BrowserPool {
 
       try {
         slotIndex = this.nextFreeSlot();
-        const cdpPort      = this.config.baseCdpPort + slotIndex;
-        const proxyPort    = this.config.upstreamProxyBase + (slotIndex % this.config.upstreamProxyRange);
-        const slotProxyRaw = buildGpmProxy(this.config, proxyPort);
+        const cdpPort   = this.config.baseCdpPort + slotIndex;
+
+        // Each email gets a fixed proxy port derived from a random seed stored
+        // permanently per profile. The port is chosen once (at profile creation)
+        // and never changed afterwards.
+        const proxyPort    = proxyPortForEmail(email, this.config);
+        const proxyRaw     = buildGpmProxy(this.config, proxyPort);
         alog.debug('acquire | slot assigned', { slotIndex, cdpPort, proxyPort });
 
-        const createProxyRaw = buildGpmProxy(this.config, this.config.upstreamProxyBase);
-
-        profileId = await this.resolveProfileId(email, createProxyRaw);
-
-        if (slotProxyRaw) {
-          alog.debug('acquire | updating proxy to slot port', { proxyPort, profileId });
-          const updateRes = await this.gpm.profiles.update(profileId, { raw_proxy: slotProxyRaw });
-          if (!updateRes.success) {
-            alog.warn('acquire | proxy update FAILED (non-fatal)', {
-              profileId, message: updateRes.message,
-            });
-          }
+        // Save assigned proxy back to the database
+        try {
+          const { updateAccountProxy } = await import('./db');
+          await updateAccountProxy(email, proxyRaw);
+        } catch (dbErr) {
+          alog.warn('acquire | failed to save proxy to db', { err: String(dbErr) });
         }
+
+        // resolveProfileId creates the profile with proxyRaw if it doesn't exist.
+        // For existing profiles the proxy is left untouched — it was set at creation.
+        profileId = await this.resolveProfileId(email, proxyRaw);
 
         alog.info('acquire | calling GPM start', { profileId, cdpPort });
         const startRes = await this.gpm.profiles.start(profileId, {
@@ -306,6 +308,26 @@ export class GpmProfilePool implements BrowserPool {
 function buildGpmProxy(config: PoolConfig, port: number): string {
   if (!config.proxyHost || !config.proxyUser || !config.proxyPass) return '';
   return `${config.proxyHost}:${port}:${config.proxyUser}:${config.proxyPass}`;
+}
+
+/**
+ * Returns a fixed proxy port for a given email by hashing the email string
+ * into a random-looking but stable offset within the configured port range.
+ *
+ * Range: [upstreamProxyBase, upstreamProxyBase + upstreamProxyRange)
+ *
+ * The same email always resolves to the same port, so the GPM profile keeps
+ * a permanent proxy assignment and no update() call is ever needed.
+ */
+function proxyPortForEmail(email: string, config: PoolConfig): number {
+  // djb2 hash — simple, deterministic, good distribution.
+  let h = 5381;
+  for (let i = 0; i < email.length; i++) {
+    h = ((h << 5) + h) ^ email.charCodeAt(i);
+    h >>>= 0; // keep unsigned 32-bit
+  }
+  const offset = h % config.upstreamProxyRange;
+  return config.upstreamProxyBase + offset;
 }
 
 /** Poll the CDP /json/version endpoint until the browser is responding. */

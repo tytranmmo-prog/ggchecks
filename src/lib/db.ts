@@ -63,6 +63,7 @@ export interface Account {
   email:                   string;
   password:                string;
   totpSecret:              string;
+  proxy:                   string | null;
   monthlyCredits:          string;
   additionalCredits:       string;
   additionalCreditsExpiry: string;
@@ -123,6 +124,7 @@ export async function getAccounts(): Promise<Account[]> {
       email:                   serviceAccounts.email,
       password:                serviceAccounts.password,
       totpSecret:              serviceAccounts.totpSecret,
+      proxy:                   serviceAccounts.proxy,
       monthlyCredits:          latestCr.monthlyCredits,
       additionalCredits:       latestCr.additionalCredits,
       additionalCreditsExpiry: latestCr.additionalCreditsExpiry,
@@ -140,6 +142,7 @@ export async function getAccounts(): Promise<Account[]> {
     email:                   r.email,
     password:                r.password,
     totpSecret:              r.totpSecret,
+    proxy:                   r.proxy,
     monthlyCredits:          r.monthlyCredits          ?? '',
     additionalCredits:       r.additionalCredits       ?? '',
     additionalCreditsExpiry: r.additionalCreditsExpiry ?? '',
@@ -176,6 +179,7 @@ export async function getAccountById(id: number): Promise<Account | null> {
       email:                   serviceAccounts.email,
       password:                serviceAccounts.password,
       totpSecret:              serviceAccounts.totpSecret,
+      proxy:                   serviceAccounts.proxy,
       monthlyCredits:          latestCr.monthlyCredits,
       additionalCredits:       latestCr.additionalCredits,
       additionalCreditsExpiry: latestCr.additionalCreditsExpiry,
@@ -196,6 +200,7 @@ export async function getAccountById(id: number): Promise<Account | null> {
     email:                   r.email,
     password:                r.password,
     totpSecret:              r.totpSecret,
+    proxy:                   r.proxy,
     monthlyCredits:          r.monthlyCredits          ?? '',
     additionalCredits:       r.additionalCredits       ?? '',
     additionalCreditsExpiry: r.additionalCreditsExpiry ?? '',
@@ -258,6 +263,17 @@ export async function update2FASecret(id: number, totpSecret: string): Promise<v
     .where(eq(serviceAccounts.id, id));
   if (result.count === 0) throw new Error(`Account id=${id} not found`);
   log.info('2FA secret updated', { id });
+}
+
+export async function updateAccountProxy(email: string, proxyString: string): Promise<void> {
+  await ensureSchema();
+  const db = getDb();
+  const result = await db
+    .update(serviceAccounts)
+    .set({ proxy: proxyString, updatedAt: new Date() })
+    .where(eq(serviceAccounts.email, email));
+  if (result.count === 0) throw new Error(`Account email=${email} not found`);
+  log.info('proxy updated', { email });
 }
 
 export async function deleteAccount(id: number): Promise<void> {
@@ -325,14 +341,14 @@ export async function getMemberCreditTotals(opts: {
   // jsonb_array_elements requires raw SQL
   const rows = await db.execute(sql`
     SELECT
-      activity->>'name'                     AS member_email,
-      SUM((activity->>'credit')::numeric)   AS total_credits,
-      COUNT(*)::int                         AS check_count
+      COALESCE(activity->>'email', activity->>'name') AS member_email,
+      SUM((activity->>'credit')::numeric)             AS total_credits,
+      COUNT(*)::int                                   AS check_count
     FROM check_results cr,
       jsonb_array_elements(cr.member_activities) AS activity
     WHERE cr.created_at BETWEEN ${opts.from} AND ${opts.to}
       AND cr.status = 'ok'
-    GROUP BY activity->>'name'
+    GROUP BY COALESCE(activity->>'email', activity->>'name')
     ORDER BY total_credits DESC
   `);
 

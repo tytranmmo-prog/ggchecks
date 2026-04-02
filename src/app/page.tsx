@@ -24,6 +24,7 @@ interface Account {
   memberActivities?: MemberActivity[];
   lastChecked?: string;
   status?: string;
+  proxy?: string | null;
 }
 
 interface Toast {
@@ -309,13 +310,14 @@ export default function HomePage() {
                   </th>
                   <th>#</th>
                   <th>Email</th>
-                  <th>Monthly Credits</th>
+                  {/* <th>Monthly Credits</th>
                   <th>Additional</th>
-                  <th>Expiry</th>
+                  <th>Expiry</th> */}
                   <th>Members</th>
+                  <th>Proxy</th>
                   <th>Last Checked</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  <th className="sticky right-0 bg-[#0a0d14]/95 backdrop-blur-md z-10 border-l border-white/[0.08] shadow-[-8px_0_15px_-3px_rgba(0,0,0,0.4)]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -337,7 +339,7 @@ export default function HomePage() {
                     </td>
                     <td className="text-slate-600 text-xs">{idx + 1}</td>
                     <td className="email-cell">{account.email}</td>
-                    <td>
+                    {/* <td>
                       {account.monthlyCredits
                         ? <span className="credit-value">{parseInt(account.monthlyCredits.replace(/,/g, ''), 10).toLocaleString()}</span>
                         : <span className="credit-empty">–</span>}
@@ -347,15 +349,16 @@ export default function HomePage() {
                         ? <span className="credit-value text-accent2">{account.additionalCredits}</span>
                         : <span className="credit-empty">–</span>}
                     </td>
-                    <td className="mono-cell text-[11px]">{account.additionalCreditsExpiry || '–'}</td>
+                    <td className="mono-cell text-[11px]">{account.additionalCreditsExpiry || '–'}</td> */}
                     <td>
                       {account.memberActivities && account.memberActivities.length > 0
                         ? <span className="text-[11px] text-slate-400 font-mono">{account.memberActivities.length} members</span>
                         : <span className="credit-empty">–</span>}
                     </td>
+                    <td className="mono-cell text-[11px] max-w-[160px] break-all whitespace-normal" title={account.proxy || ''}>{account.proxy || '–'}</td>
                     <td className="mono-cell text-[11px]">{formatDate(account.lastChecked)}</td>
                     <td>{statusBadge(account.status)}</td>
-                    <td>
+                    <td className="sticky right-0 bg-[#0a0d14]/95 backdrop-blur-md z-10 border-l border-white/[0.08] shadow-[-8px_0_15px_-3px_rgba(0,0,0,0.4)]">
                       <div className="action-cell">
                         {account.status && account.status.startsWith('error') && (
                           <a
