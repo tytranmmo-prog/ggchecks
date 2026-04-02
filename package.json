@@ -9,6 +9,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
+    "db:snapshot": "docker compose exec -T postgres pg_dump -U ggchecks ggchecks > db_snapshot.sql",
+    "db:restore": "docker compose exec -T postgres psql -U ggchecks ggchecks < db_snapshot.sql",
     "check:one": "bun checkOne.ts",
     "change2fa": "bun change2fa.ts",
     "logs": "cat logs/app.log | bunx pino-pretty",

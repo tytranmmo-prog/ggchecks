@@ -103,6 +103,20 @@ bun db:migrate
 bun db:studio
 ```
 
+### Backup & Restore (Snapshots)
+
+If you need to move your database to another machine or create a backup without worrying about external database hosts (like Supabase), you can use the built-in snapshot commands:
+
+```bash
+# 1. Create a snapshot on the current machine
+npm run db:snapshot
+# (Creates a `db_snapshot.sql` file in your project root containing all database structure and data)
+
+# 2. Apply the snapshot on the new machine
+# (Make sure to start the new, empty DB first with `docker-compose up -d postgres`)
+npm run db:restore
+```
+
 ---
 
 ## 📦 Migrating from Google Sheets → PostgreSQL
