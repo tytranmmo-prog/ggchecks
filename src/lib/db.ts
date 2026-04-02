@@ -1,188 +1,344 @@
 import postgres from 'postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import { and, asc, desc, eq, lt, sql } from 'drizzle-orm';
+import * as schema from './schema';
+import { serviceAccounts, checkResults } from './schema';
+import type { MemberActivity } from './schema';
 import { createLogger } from './pino-logger';
+
+export type { MemberActivity };
 
 const log = createLogger('db');
 
-// ── Connection ─────────────────────────────────────────────────────────────────
-// Lazily initialised singleton — reused across hot-reloads in dev.
+// ── Singleton ─────────────────────────────────────────────────────────────────
 
 declare global {
   // eslint-disable-next-line no-var
-  var __pgSql: ReturnType<typeof postgres> | undefined;
+  var __drizzleDb: ReturnType<typeof drizzle<typeof schema>> | undefined;
 }
 
-function getSql() {
-  if (!global.__pgSql) {
+function getDb() {
+  if (!global.__drizzleDb) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is not set in environment');
 
-    global.__pgSql = postgres(url, {
+    const client = postgres(url, {
       max: 10,
       idle_timeout: 30,
       connect_timeout: 10,
-      onnotice: (notice) => log.debug('pg notice', { message: notice.message }),
+      onnotice: (n) => log.debug('pg notice', { message: n.message }),
     });
 
-    log.info('PostgreSQL connection pool created');
+    global.__drizzleDb = drizzle(client, { schema });
+    log.info('Drizzle ORM initialized');
   }
-  return global.__pgSql;
+  return global.__drizzleDb;
 }
 
-// ── Schema ─────────────────────────────────────────────────────────────────────
+// ── Schema guard ──────────────────────────────────────────────────────────────
 
-const CREATE_TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS accounts (
-    id                        BIGSERIAL PRIMARY KEY,
-    email                     TEXT NOT NULL UNIQUE,
-    password                  TEXT NOT NULL,
-    totp_secret               TEXT NOT NULL,
-    monthly_credits           TEXT NOT NULL DEFAULT '',
-    additional_credits        TEXT NOT NULL DEFAULT '',
-    additional_credits_expiry TEXT NOT NULL DEFAULT '',
-    member_activities         TEXT NOT NULL DEFAULT '',
-    last_checked              TEXT NOT NULL DEFAULT '',
-    status                    TEXT NOT NULL DEFAULT 'pending',
-    screenshot                TEXT NOT NULL DEFAULT '',
-    created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-`;
+let schemaVerified = false;
 
-let schemaInitialised = false;
-
-async function ensureSchema() {
-  if (schemaInitialised) return;
-  const sql = getSql();
-  await sql.unsafe(CREATE_TABLE_SQL);
-  schemaInitialised = true;
-  log.info('Database schema ready');
+export async function ensureSchema() {
+  if (schemaVerified) return;
+  const db = getDb();
+  const res = await db.execute(sql`
+    SELECT COUNT(*) AS n FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name IN ('service_accounts', 'check_results')
+  `);
+  if (Number(res[0].n) < 2) {
+    throw new Error(
+      'Database tables are missing. Run the migration script first.',
+    );
+  }
+  schemaVerified = true;
+  log.info('Database schema verified');
 }
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Public types ──────────────────────────────────────────────────────────────
 
 export interface Account {
-  id: number;
-  email: string;
-  password: string;
-  totpSecret: string;
-  monthlyCredits?: string;
-  additionalCredits?: string;
-  additionalCreditsExpiry?: string;
-  memberActivities?: string;
-  lastChecked?: string;
-  status?: string;
-  screenshot?: string;
+  id:                      number;
+  email:                   string;
+  password:                string;
+  totpSecret:              string;
+  monthlyCredits:          string;
+  additionalCredits:       string;
+  additionalCreditsExpiry: string;
+  memberActivities:        MemberActivity[];
+  lastChecked:             string;
+  status:                  string;
+  screenshot:              string;
 }
 
-// ── Row mapper ─────────────────────────────────────────────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toAccount(row: any): Account {
-  return {
-    id:                       Number(row.id),
-    email:                    row.email ?? '',
-    password:                 row.password ?? '',
-    totpSecret:               row.totp_secret ?? '',
-    monthlyCredits:           row.monthly_credits ?? '',
-    additionalCredits:        row.additional_credits ?? '',
-    additionalCreditsExpiry:  row.additional_credits_expiry ?? '',
-    memberActivities:         row.member_activities ?? '',
-    lastChecked:              row.last_checked ?? '',
-    status:                   row.status ?? 'pending',
-    screenshot:               row.screenshot ?? '',
-  };
+export interface CheckHistoryItem {
+  id:                      number;
+  monthlyCredits:          string;
+  additionalCredits:       string;
+  additionalCreditsExpiry: string;
+  memberActivities:        MemberActivity[];
+  lastChecked:             string;
+  status:                  string;
+  screenshot:              string;
+  createdAt:               string;
 }
 
-// ── CRUD ───────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
+function toIso(d: Date | string | null | undefined): string {
+  if (!d) return '';
+  return d instanceof Date ? d.toISOString() : new Date(d).toISOString();
+}
+
+// ── CRUD ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns each service_account with the latest check_result joined in.
+ * Uses DISTINCT ON subquery so Drizzle returns one row per account.
+ */
 export async function getAccounts(): Promise<Account[]> {
   await ensureSchema();
-  const sql = getSql();
-  const rows = await sql`SELECT * FROM accounts ORDER BY id ASC`;
-  return rows.map(toAccount);
+  const db = getDb();
+
+  // Subquery: latest check_result per service_account
+  const latestCr = db
+    .selectDistinctOn([checkResults.serviceAccountId], {
+      serviceAccountId:        checkResults.serviceAccountId,
+      monthlyCredits:          checkResults.monthlyCredits,
+      additionalCredits:       checkResults.additionalCredits,
+      additionalCreditsExpiry: checkResults.additionalCreditsExpiry,
+      memberActivities:        checkResults.memberActivities,
+      lastChecked:             checkResults.lastChecked,
+      status:                  checkResults.status,
+      screenshot:              checkResults.screenshot,
+    })
+    .from(checkResults)
+    .orderBy(checkResults.serviceAccountId, desc(checkResults.createdAt))
+    .as('latest_cr');
+
+  const rows = await db
+    .select({
+      id:                      serviceAccounts.id,
+      email:                   serviceAccounts.email,
+      password:                serviceAccounts.password,
+      totpSecret:              serviceAccounts.totpSecret,
+      monthlyCredits:          latestCr.monthlyCredits,
+      additionalCredits:       latestCr.additionalCredits,
+      additionalCreditsExpiry: latestCr.additionalCreditsExpiry,
+      memberActivities:        latestCr.memberActivities,
+      lastChecked:             latestCr.lastChecked,
+      status:                  latestCr.status,
+      screenshot:              latestCr.screenshot,
+    })
+    .from(serviceAccounts)
+    .leftJoin(latestCr, eq(serviceAccounts.id, latestCr.serviceAccountId))
+    .orderBy(asc(serviceAccounts.id));
+
+  return rows.map(r => ({
+    id:                      r.id,
+    email:                   r.email,
+    password:                r.password,
+    totpSecret:              r.totpSecret,
+    monthlyCredits:          r.monthlyCredits          ?? '',
+    additionalCredits:       r.additionalCredits       ?? '',
+    additionalCreditsExpiry: r.additionalCreditsExpiry ?? '',
+    memberActivities:        (r.memberActivities as MemberActivity[]) ?? [],
+    lastChecked:             toIso(r.lastChecked),
+    status:                  r.status                  ?? 'pending',
+    screenshot:              r.screenshot              ?? '',
+  }));
 }
 
 export async function getAccountById(id: number): Promise<Account | null> {
   await ensureSchema();
-  const sql = getSql();
-  const rows = await sql`SELECT * FROM accounts WHERE id = ${id}`;
-  return rows.length ? toAccount(rows[0]) : null;
+  const db = getDb();
+
+  const latestCr = db
+    .selectDistinctOn([checkResults.serviceAccountId], {
+      serviceAccountId:        checkResults.serviceAccountId,
+      monthlyCredits:          checkResults.monthlyCredits,
+      additionalCredits:       checkResults.additionalCredits,
+      additionalCreditsExpiry: checkResults.additionalCreditsExpiry,
+      memberActivities:        checkResults.memberActivities,
+      lastChecked:             checkResults.lastChecked,
+      status:                  checkResults.status,
+      screenshot:              checkResults.screenshot,
+    })
+    .from(checkResults)
+    .where(eq(checkResults.serviceAccountId, id))
+    .orderBy(checkResults.serviceAccountId, desc(checkResults.createdAt))
+    .as('latest_cr');
+
+  const rows = await db
+    .select({
+      id:                      serviceAccounts.id,
+      email:                   serviceAccounts.email,
+      password:                serviceAccounts.password,
+      totpSecret:              serviceAccounts.totpSecret,
+      monthlyCredits:          latestCr.monthlyCredits,
+      additionalCredits:       latestCr.additionalCredits,
+      additionalCreditsExpiry: latestCr.additionalCreditsExpiry,
+      memberActivities:        latestCr.memberActivities,
+      lastChecked:             latestCr.lastChecked,
+      status:                  latestCr.status,
+      screenshot:              latestCr.screenshot,
+    })
+    .from(serviceAccounts)
+    .leftJoin(latestCr, eq(serviceAccounts.id, latestCr.serviceAccountId))
+    .where(eq(serviceAccounts.id, id))
+    .limit(1);
+
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    id:                      r.id,
+    email:                   r.email,
+    password:                r.password,
+    totpSecret:              r.totpSecret,
+    monthlyCredits:          r.monthlyCredits          ?? '',
+    additionalCredits:       r.additionalCredits       ?? '',
+    additionalCreditsExpiry: r.additionalCreditsExpiry ?? '',
+    memberActivities:        (r.memberActivities as MemberActivity[]) ?? [],
+    lastChecked:             toIso(r.lastChecked),
+    status:                  r.status                  ?? 'pending',
+    screenshot:              r.screenshot              ?? '',
+  };
 }
 
 export async function addAccount(account: {
-  email: string;
-  password: string;
+  email:      string;
+  password:   string;
   totpSecret: string;
 }): Promise<void> {
   await ensureSchema();
-  const sql = getSql();
-  await sql`
-    INSERT INTO accounts (email, password, totp_secret, status)
-    VALUES (${account.email}, ${account.password}, ${account.totpSecret}, 'pending')
-  `;
+  const db = getDb();
+  await db.insert(serviceAccounts).values({
+    email:      account.email,
+    password:   account.password,
+    totpSecret: account.totpSecret,
+  });
   log.info('account added', { email: account.email });
 }
 
+/** Appends a new check_result row — full history preserved. */
 export async function updateCreditResult(
-  id: number,
+  serviceAccountId: number,
   data: {
-    monthlyCredits: string;
-    additionalCredits: string;
+    monthlyCredits:          string;
+    additionalCredits:       string;
     additionalCreditsExpiry: string;
-    memberActivities: string;
-    lastChecked: string;
-    status: string;
-  }
+    memberActivities:        MemberActivity[];
+    lastChecked:             string;
+    status:                  string;
+    screenshot?:             string;
+  },
 ): Promise<void> {
   await ensureSchema();
-  const sql = getSql();
-  const result = await sql`
-    UPDATE accounts SET
-      monthly_credits           = ${data.monthlyCredits},
-      additional_credits        = ${data.additionalCredits},
-      additional_credits_expiry = ${data.additionalCreditsExpiry},
-      member_activities         = ${data.memberActivities},
-      last_checked              = ${data.lastChecked},
-      status                    = ${data.status},
-      updated_at                = NOW()
-    WHERE id = ${id}
-  `;
-  if (result.count === 0) throw new Error(`Account id=${id} not found`);
-  log.debug('credit result updated', { id, status: data.status });
+  const db = getDb();
+  await db.insert(checkResults).values({
+    serviceAccountId,
+    monthlyCredits:          data.monthlyCredits,
+    additionalCredits:       data.additionalCredits,
+    additionalCreditsExpiry: data.additionalCreditsExpiry,
+    memberActivities:        data.memberActivities,
+    lastChecked:             data.lastChecked ? new Date(data.lastChecked) : new Date(),
+    status:                  data.status,
+    screenshot:              data.screenshot ?? '',
+  });
+  log.debug('check result recorded', { serviceAccountId, status: data.status });
 }
 
 export async function update2FASecret(id: number, totpSecret: string): Promise<void> {
   await ensureSchema();
-  const sql = getSql();
-  const result = await sql`
-    UPDATE accounts SET
-      totp_secret = ${totpSecret},
-      updated_at  = NOW()
-    WHERE id = ${id}
-  `;
+  const db = getDb();
+  const result = await db
+    .update(serviceAccounts)
+    .set({ totpSecret, updatedAt: new Date() })
+    .where(eq(serviceAccounts.id, id));
   if (result.count === 0) throw new Error(`Account id=${id} not found`);
   log.info('2FA secret updated', { id });
 }
 
 export async function deleteAccount(id: number): Promise<void> {
   await ensureSchema();
-  const sql = getSql();
-  const result = await sql`DELETE FROM accounts WHERE id = ${id}`;
+  const db = getDb();
+  // check_results deleted via ON DELETE CASCADE
+  const result = await db
+    .delete(serviceAccounts)
+    .where(eq(serviceAccounts.id, id));
   if (result.count === 0) throw new Error(`Account id=${id} not found`);
   log.info('account deleted', { id });
 }
 
-export async function updateScreenshot(id: number, screenshotPath: string): Promise<void> {
+// ── History ───────────────────────────────────────────────────────────────────
+
+/** Cursor-based paginated check history for one service account (newest first). */
+export async function getCheckHistory(opts: {
+  serviceAccountId: number;
+  cursor:           number; // last id seen; 0 = first page
+  limit:            number;
+}): Promise<{ items: CheckHistoryItem[]; nextCursor: number | null; hasMore: boolean }> {
   await ensureSchema();
-  const sql = getSql();
-  await sql`
-    UPDATE accounts SET
-      screenshot = ${screenshotPath},
-      updated_at = NOW()
-    WHERE id = ${id}
-  `;
-  log.debug('screenshot updated', { id, screenshotPath });
+  const db = getDb();
+
+  const where = opts.cursor > 0
+    ? and(
+        eq(checkResults.serviceAccountId, opts.serviceAccountId),
+        lt(checkResults.id, opts.cursor),
+      )
+    : eq(checkResults.serviceAccountId, opts.serviceAccountId);
+
+  const rows = await db
+    .select()
+    .from(checkResults)
+    .where(where)
+    .orderBy(desc(checkResults.id))
+    .limit(opts.limit + 1);
+
+  const hasMore = rows.length > opts.limit;
+  const items   = (hasMore ? rows.slice(0, opts.limit) : rows).map(r => ({
+    id:                      r.id,
+    monthlyCredits:          r.monthlyCredits,
+    additionalCredits:       r.additionalCredits,
+    additionalCreditsExpiry: r.additionalCreditsExpiry,
+    memberActivities:        (r.memberActivities as MemberActivity[]) ?? [],
+    lastChecked:             toIso(r.lastChecked),
+    status:                  r.status,
+    screenshot:              r.screenshot,
+    createdAt:               toIso(r.createdAt),
+  }));
+
+  return { items, nextCursor: hasMore ? items[items.length - 1].id : null, hasMore };
 }
 
-// Legacy alias kept for the migration script
-export { ensureSchema };
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+/** Total credits consumed per member name within a date range. */
+export async function getMemberCreditTotals(opts: {
+  from: Date;
+  to:   Date;
+}): Promise<{ memberEmail: string; totalCredits: number; checkCount: number }[]> {
+  await ensureSchema();
+  const db = getDb();
+
+  // jsonb_array_elements requires raw SQL
+  const rows = await db.execute(sql`
+    SELECT
+      activity->>'name'                     AS member_email,
+      SUM((activity->>'credit')::numeric)   AS total_credits,
+      COUNT(*)::int                         AS check_count
+    FROM check_results cr,
+      jsonb_array_elements(cr.member_activities) AS activity
+    WHERE cr.created_at BETWEEN ${opts.from} AND ${opts.to}
+      AND cr.status = 'ok'
+    GROUP BY activity->>'name'
+    ORDER BY total_credits DESC
+  `);
+
+  return rows.map(r => ({
+    memberEmail:  r.member_email  as string,
+    totalCredits: Number(r.total_credits),
+    checkCount:   Number(r.check_count),
+  }));
+}

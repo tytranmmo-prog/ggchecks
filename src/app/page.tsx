@@ -2,10 +2,16 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import CheckModal from '@/components/CheckModal';
+import CheckHistoryModal from '@/components/CheckHistoryModal';
 import Change2FAModal from '@/components/Change2FAModal';
 import AddAccountModal from '@/components/AddAccountModal';
 import BulkCheckModal from '@/components/BulkCheckModal';
 import SettingsModal from '@/components/SettingsModal';
+
+interface MemberActivity {
+  name: string;
+  credit: number;
+}
 
 interface Account {
   id: number;
@@ -15,7 +21,7 @@ interface Account {
   monthlyCredits?: string;
   additionalCredits?: string;
   additionalCreditsExpiry?: string;
-  memberActivities?: string;
+  memberActivities?: MemberActivity[];
   lastChecked?: string;
   status?: string;
 }
@@ -41,6 +47,7 @@ export default function HomePage() {
   const [showBulkCheckSelected, setShowBulkCheckSelected] = useState(false);
   const [showBulkCheckPending, setShowBulkCheckPending] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState<Account | null>(null);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
   const [resettingProfile, setResettingProfile] = useState<number | null>(null);
   const [resettingAll, setResettingAll] = useState(false);
@@ -342,8 +349,8 @@ export default function HomePage() {
                     </td>
                     <td className="mono-cell text-[11px]">{account.additionalCreditsExpiry || '–'}</td>
                     <td>
-                      {account.memberActivities
-                        ? <span className="text-[11px] text-slate-400 font-mono">{account.memberActivities.split(' | ').length} members</span>
+                      {account.memberActivities && account.memberActivities.length > 0
+                        ? <span className="text-[11px] text-slate-400 font-mono">{account.memberActivities.length} members</span>
                         : <span className="credit-empty">–</span>}
                     </td>
                     <td className="mono-cell text-[11px]">{formatDate(account.lastChecked)}</td>
@@ -360,6 +367,7 @@ export default function HomePage() {
                           >📸</a>
                         )}
                         <button className="btn btn-success" onClick={() => setCheckTarget(account)} title="Check credits">⚡ Check</button>
+                        <button className="btn btn-secondary" onClick={() => setHistoryTarget(account)} title="View check history">📋 History</button>
                         <button className="btn btn-warning" onClick={() => setTwoFATarget(account)} title="Change 2FA secret">🔐 2FA</button>
                         <button
                           className="btn btn-secondary btn-icon"
@@ -415,6 +423,9 @@ export default function HomePage() {
       )}
       {showSettings && (
         <SettingsModal onClose={() => setShowSettings(false)} showToast={showToast} />
+      )}
+      {historyTarget && (
+        <CheckHistoryModal account={historyTarget} onClose={() => setHistoryTarget(null)} />
       )}
 
       {/* Toasts */}

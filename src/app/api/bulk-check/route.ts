@@ -1,6 +1,7 @@
 import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
 import { updateCreditResult } from '@/lib/db';
+import type { MemberActivity } from '@/lib/db';
 import { getPool, type PoolType } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
@@ -99,7 +100,6 @@ export async function POST(req: NextRequest) {
       let errors    = 0;
 
       const tasks = accounts.map(async (account) => {
-        // Bind email + rowIndex to every log call for this account.
         const alog = rlog.child({ email: account.email, id: account.id });
         alog.info('account task | waiting for pool slot');
 
@@ -122,18 +122,16 @@ export async function POST(req: NextRequest) {
           }
 
           if (result.success) {
-            const memberText = ((result.memberActivities ?? []) as { name: string; credit: number }[])
-              .map(m => `${m.name}: ${m.credit}`)
-              .join(' | ');
+            const memberActivities = (result.memberActivities ?? []) as MemberActivity[];
 
             await updateCreditResult(account.id, {
               monthlyCredits:          String(result.monthlyCredits          ?? ''),
               additionalCredits:       String(result.additionalCredits       ?? ''),
               additionalCreditsExpiry: String(result.additionalCreditsExpiry ?? ''),
-              memberActivities:        memberText,
+              memberActivities,
               lastChecked:             String(result.checkAt                 ?? new Date().toISOString()),
               status:                  'ok',
-            }).catch(e => alog.error('sheets update failed', { err: String(e) }));
+            }).catch(e => alog.error('db update failed', { err: String(e) }));
 
             send({ type: 'account_done', id: account.id, result });
             alog.info('account task | done ✓');
@@ -165,9 +163,9 @@ export async function POST(req: NextRequest) {
 
           await updateCreditResult(account.id, {
             monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
-            memberActivities: '', lastChecked: new Date().toISOString(),
+            memberActivities: [], lastChecked: new Date().toISOString(),
             status: `error: ${msg.slice(0, 100)}`,
-          }).catch(e => alog.error('sheets error-status update failed', { err: String(e) }));
+          }).catch(e => alog.error('db error-status update failed', { err: String(e) }));
 
           errors++;
         } finally {

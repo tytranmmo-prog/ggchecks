@@ -80,15 +80,12 @@ export async function POST(req: NextRequest) {
             const result = JSON.parse(raw);
 
             if (result.success) {
-              const memberText = (result.memberActivities || [])
-                .map((m: { name: string; credit: number }) => `${m.name}: ${m.credit}`)
-                .join(' | ');
               try {
                 await updateCreditResult(id, {
                   monthlyCredits:          result.monthlyCredits          || '',
                   additionalCredits:       result.additionalCredits       || '',
                   additionalCreditsExpiry: result.additionalCreditsExpiry || '',
-                  memberActivities:        memberText,
+                  memberActivities:        result.memberActivities        || [],
                   lastChecked:             result.checkAt                 || new Date().toISOString(),
                   status:                  'ok',
                 });
@@ -107,7 +104,7 @@ export async function POST(req: NextRequest) {
 
               await updateCreditResult(id, {
                 monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
-                memberActivities: '', lastChecked: new Date().toISOString(),
+                memberActivities: [], lastChecked: new Date().toISOString(),
                 status: `error: ${result.error}`,
               }).catch(() => {});
 

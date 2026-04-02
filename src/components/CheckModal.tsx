@@ -10,7 +10,7 @@ interface Account {
   monthlyCredits?: string;
   additionalCredits?: string;
   additionalCreditsExpiry?: string;
-  memberActivities?: string;
+  memberActivities?: MemberActivity[];
   lastChecked?: string;
   status?: string;
 }
@@ -18,7 +18,7 @@ interface Account {
 interface MemberActivity {
   name: string;
   credit: number;
-  checkAt: string;
+  checkAt?: string;
 }
 
 interface CheckResult {
@@ -62,7 +62,7 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
         email: account.email,
         password: account.password,
         totpSecret: account.totpSecret,
-        rowIndex: account.id,
+        id: account.id,
       };
 
       const response = await fetch('/api/check', {
