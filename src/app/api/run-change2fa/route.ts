@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
-import { update2FASecret } from '@/lib/sheets';
+import { update2FASecret } from '@/lib/db';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
 
@@ -10,9 +10,9 @@ const log = createLogger('2fa');
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, rowIndex, port } = body;
+  const { email, password, totpSecret, id, port } = body;
 
-  if (!email || !password || !totpSecret || !rowIndex) {
+  if (!email || !password || !totpSecret || !id) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
   }
 
@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
       const scriptPath = getConfig('CHANGE2FA_PATH') || `${cwd}/change2fa.ts`;
       const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port };
 
-      // Bind email + rowIndex for every server-side log in this request.
-      const rlog = log.child({ email, rowIndex, port });
+      // Bind email + id for every server-side log in this request.
+      const rlog = log.child({ email, id, port });
       rlog.info('2FA rotation requested', { scriptPath });
 
       const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
@@ -62,8 +62,8 @@ export async function POST(req: NextRequest) {
             if (result.success) {
               rlog.info('2fa rotation succeeded', { newSecret: result.newTotpSecret ? '***' : 'none' });
               try {
-                await update2FASecret(rowIndex, result.newTotpSecret);
-                send({ type: 'log', message: `✅ New secret saved to sheet: ${result.newTotpSecret}` });
+                await update2FASecret(id, result.newTotpSecret);
+                send({ type: 'log', message: `✅ New secret saved: ${result.newTotpSecret}` });
               } catch (saveErr: unknown) {
                 const msg = saveErr instanceof Error ? saveErr.message : 'Unknown';
                 rlog.error('sheet save error', { err: msg });

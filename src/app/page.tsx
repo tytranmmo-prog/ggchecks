@@ -8,7 +8,7 @@ import BulkCheckModal from '@/components/BulkCheckModal';
 import SettingsModal from '@/components/SettingsModal';
 
 interface Account {
-  rowIndex: number;
+  id: number;
   email: string;
   password: string;
   totpSecret: string;
@@ -75,12 +75,12 @@ export default function HomePage() {
 
   const handleDelete = async (account: Account) => {
     if (!confirm(`Delete account ${account.email}?`)) return;
-    setDeletingRow(account.rowIndex);
+    setDeletingRow(account.id);
     try {
       const res = await fetch('/api/delete', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rowIndex: account.rowIndex }),
+        body: JSON.stringify({ id: account.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -95,7 +95,7 @@ export default function HomePage() {
 
   const handleResetProfile = async (account: Account) => {
     if (!confirm(`Reset Chrome profile for ${account.email}?\n\nThis will delete all cached login data. The account will need to authenticate from scratch on the next check.`)) return;
-    setResettingProfile(account.rowIndex);
+    setResettingProfile(account.id);
     try {
       const res = await fetch('/api/profile', {
         method: 'DELETE',
@@ -286,14 +286,14 @@ export default function HomePage() {
                     <input
                       type="checkbox"
                       title="Select all visible rows"
-                      checked={filtered.length > 0 && filtered.every(a => selectedRows.has(a.rowIndex))}
+                      checked={filtered.length > 0 && filtered.every(a => selectedRows.has(a.id))}
                       onChange={e => {
                         if (e.target.checked) {
-                          setSelectedRows(prev => new Set([...prev, ...filtered.map(a => a.rowIndex)]));
+                          setSelectedRows(prev => new Set([...prev, ...filtered.map(a => a.id)]));
                         } else {
                           setSelectedRows(prev => {
                             const next = new Set(prev);
-                            filtered.forEach(a => next.delete(a.rowIndex));
+                            filtered.forEach(a => next.delete(a.id));
                             return next;
                           });
                         }
@@ -313,16 +313,16 @@ export default function HomePage() {
               </thead>
               <tbody>
                 {filtered.map((account, idx) => (
-                  <tr key={account.rowIndex} className={selectedRows.has(account.rowIndex) ? 'row-selected' : ''}>
+                  <tr key={account.id} className={selectedRows.has(account.id) ? 'row-selected' : ''}>
                     <td style={{ textAlign: 'center' }}>
                       <input
                         type="checkbox"
-                        checked={selectedRows.has(account.rowIndex)}
+                        checked={selectedRows.has(account.id)}
                         onChange={e => {
                           setSelectedRows(prev => {
                             const next = new Set(prev);
-                            if (e.target.checked) next.add(account.rowIndex);
-                            else next.delete(account.rowIndex);
+                            if (e.target.checked) next.add(account.id);
+                            else next.delete(account.id);
                             return next;
                           });
                         }}
@@ -364,18 +364,18 @@ export default function HomePage() {
                         <button
                           className="btn btn-secondary btn-icon"
                           onClick={() => handleResetProfile(account)}
-                          disabled={resettingProfile === account.rowIndex}
+                          disabled={resettingProfile === account.id}
                           title="Reset Chrome profile"
                         >
-                          {resettingProfile === account.rowIndex ? <span className="spinner" /> : '🧹'}
+                          {resettingProfile === account.id ? <span className="spinner" /> : '🧹'}
                         </button>
                         <button
                           className="btn btn-danger btn-icon"
                           onClick={() => handleDelete(account)}
-                          disabled={deletingRow === account.rowIndex}
+                          disabled={deletingRow === account.id}
                           title="Delete account"
                         >
-                          {deletingRow === account.rowIndex ? <span className="spinner" /> : '🗑'}
+                          {deletingRow === account.id ? <span className="spinner" /> : '🗑'}
                         </button>
                       </div>
                     </td>
@@ -408,7 +408,7 @@ export default function HomePage() {
       )}
       {showBulkCheckSelected && selectedRows.size > 0 && (
         <BulkCheckModal
-          accounts={accounts.filter(a => selectedRows.has(a.rowIndex))}
+          accounts={accounts.filter(a => selectedRows.has(a.id))}
           onClose={() => setShowBulkCheckSelected(false)}
           onDone={() => { fetchAccounts(true); setSelectedRows(new Set()); }}
         />

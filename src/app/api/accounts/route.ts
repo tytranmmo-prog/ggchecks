@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAccounts, addAccount } from '@/lib/sheets';
+import { getAccounts, addAccount } from '@/lib/db';
 
 export async function GET() {
   try {

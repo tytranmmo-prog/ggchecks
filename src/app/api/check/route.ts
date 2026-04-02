@@ -1,6 +1,6 @@
 import { exec, spawn } from 'child_process';
 import { NextRequest } from 'next/server';
-import { updateCreditResult, uploadScreenshotToDrive, updateErrorScreenshot } from '@/lib/sheets';
+import { updateCreditResult } from '@/lib/db';
 import { getPool } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
@@ -11,16 +11,16 @@ const log = createLogger('check');
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, rowIndex } = body;
+  const { email, password, totpSecret, id } = body;
 
-  if (!email || !password || !totpSecret || !rowIndex) {
+  if (!email || !password || !totpSecret || !id) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
   }
 
   const encoder    = new TextEncoder();
   const scriptPath = getConfig('CHECKER_PATH') || `${process.cwd()}/checkOne.ts`;
   // Bind email + rowIndex to every server-side log for this request.
-  const rlog = log.child({ email, rowIndex });
+  const rlog = log.child({ email, id });
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
                 .map((m: { name: string; credit: number }) => `${m.name}: ${m.credit}`)
                 .join(' | ');
               try {
-                await updateCreditResult(rowIndex, {
+                await updateCreditResult(id, {
                   monthlyCredits:          result.monthlyCredits          || '',
                   additionalCredits:       result.additionalCredits       || '',
                   additionalCreditsExpiry: result.additionalCreditsExpiry || '',
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
                 send({ type: 'log', message: `📸 Screenshot saved locally as ${screenshotUrl}` });
               }
 
-              await updateCreditResult(rowIndex, {
+              await updateCreditResult(id, {
                 monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
                 memberActivities: '', lastChecked: new Date().toISOString(),
                 status: `error: ${result.error}`,

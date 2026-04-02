@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 
 interface Account {
-  rowIndex: number;
+  id: number;
   email: string;
   password: string;
   totpSecret: string;
@@ -62,7 +62,7 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
         email: account.email,
         password: account.password,
         totpSecret: account.totpSecret,
-        rowIndex: account.rowIndex,
+        rowIndex: account.id,
       };
 
       const response = await fetch('/api/check', {

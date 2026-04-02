@@ -1,6 +1,6 @@
 import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
-import { updateCreditResult } from '@/lib/sheets';
+import { updateCreditResult } from '@/lib/db';
 import { getPool, type PoolType } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
@@ -17,7 +17,7 @@ function randomRunId(): string {
 }
 
 interface AccountInput {
-  rowIndex: number;
+  id: number;
   email: string;
   password: string;
   totpSecret: string;
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
 
       const tasks = accounts.map(async (account) => {
         // Bind email + rowIndex to every log call for this account.
-        const alog = rlog.child({ email: account.email, rowIndex: account.rowIndex });
+        const alog = rlog.child({ email: account.email, id: account.id });
         alog.info('account task | waiting for pool slot');
 
         let release: (() => Promise<void>) | undefined;
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
         try {
           ({ port, release } = await pool.acquire(account.email));
           alog.info('account task | slot acquired', { port });
-          send({ type: 'account_start', rowIndex: account.rowIndex, email: account.email, port });
+          send({ type: 'account_start', id: account.id, email: account.email, port });
           send({ type: 'chrome_ready', port });
 
           const stdout = await runCheck(account, port, scriptPath, alog);
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
               .map(m => `${m.name}: ${m.credit}`)
               .join(' | ');
 
-            await updateCreditResult(account.rowIndex, {
+            await updateCreditResult(account.id, {
               monthlyCredits:          String(result.monthlyCredits          ?? ''),
               additionalCredits:       String(result.additionalCredits       ?? ''),
               additionalCreditsExpiry: String(result.additionalCreditsExpiry ?? ''),
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
               status:                  'ok',
             }).catch(e => alog.error('sheets update failed', { err: String(e) }));
 
-            send({ type: 'account_done', rowIndex: account.rowIndex, result });
+            send({ type: 'account_done', id: account.id, result });
             alog.info('account task | done ✓');
             completed++;
           } else {
@@ -161,9 +161,9 @@ export async function POST(req: NextRequest) {
             } catch { /* msg is not JSON */ }
           }
 
-          send({ type: 'account_error', rowIndex: account.rowIndex, error: msg, screenshotUrl });
+          send({ type: 'account_error', id: account.id, error: msg, screenshotUrl });
 
-          await updateCreditResult(account.rowIndex, {
+          await updateCreditResult(account.id, {
             monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
             memberActivities: '', lastChecked: new Date().toISOString(),
             status: `error: ${msg.slice(0, 100)}`,

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 
 interface Account {
-  rowIndex: number;
+  id: number;
   email: string;
   password: string;
   totpSecret: string;
@@ -12,7 +12,7 @@ interface Account {
 type AccountStatus = 'queued' | 'running' | 'done' | 'error';
 
 interface AccountState {
-  rowIndex: number;
+  id: number;
   email: string;
   status: AccountStatus;
   monthlyCredits?: string;
@@ -28,7 +28,7 @@ interface Props {
 
 export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
   const [states, setStates] = useState<AccountState[]>(
-    accounts.map(a => ({ rowIndex: a.rowIndex, email: a.email, status: 'queued' }))
+    accounts.map(a => ({ id: a.id, email: a.email, status: 'queued' }))
   );
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
@@ -36,14 +36,14 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
   const [summary, setSummary] = useState<{ completed: number; errors: number } | null>(null);
   const startedRef = useRef(false);
 
-  const updateState = (rowIndex: number, patch: Partial<AccountState>) =>
-    setStates(prev => prev.map(s => s.rowIndex === rowIndex ? { ...s, ...patch } : s));
+  const updateState = (id: number, patch: Partial<AccountState>) =>
+    setStates(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
 
   const startBulk = async () => {
     setRunning(true);
     setDone(false);
     setSummary(null);
-    setStates(accounts.map(a => ({ rowIndex: a.rowIndex, email: a.email, status: 'queued' })));
+    setStates(accounts.map(a => ({ id: a.id, email: a.email, status: 'queued' })));
 
     try {
       const res = await fetch('/api/bulk-check', {
@@ -70,13 +70,13 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
           try {
             const ev = JSON.parse(line.slice(6));
             if (ev.type === 'chrome_ready') setChromePort(ev.port);
-            else if (ev.type === 'account_start') updateState(ev.rowIndex, { status: 'running' });
-            else if (ev.type === 'account_done') updateState(ev.rowIndex, {
+            else if (ev.type === 'account_start') updateState(ev.id, { status: 'running' });
+            else if (ev.type === 'account_done') updateState(ev.id, {
               status: 'done',
               monthlyCredits: ev.result?.monthlyCredits,
               additionalCredits: ev.result?.additionalCredits,
             });
-            else if (ev.type === 'account_error') updateState(ev.rowIndex, { status: 'error', error: ev.error });
+            else if (ev.type === 'account_error') updateState(ev.id, { status: 'error', error: ev.error });
             else if (ev.type === 'done') {
               setSummary({ completed: ev.completed, errors: ev.errors });
               setDone(true);
@@ -166,7 +166,7 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
               </thead>
               <tbody>
                 {states.map((s, i) => (
-                  <tr key={s.rowIndex}>
+                  <tr key={s.id}>
                     <td className="text-slate-600 text-[11px]">{i + 1}</td>
                     <td className="email-cell" style={{ fontSize: 12 }}>{s.email}</td>
                     <td style={{ textAlign: 'center' }}>

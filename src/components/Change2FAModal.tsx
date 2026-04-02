@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 
 interface Account {
-  rowIndex: number;
+  id: number;
   email: string;
   password: string;
   totpSecret: string;
@@ -64,7 +64,7 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
           email: account.email,
           password: account.password,
           totpSecret: account.totpSecret,
-          rowIndex: account.rowIndex,
+          rowIndex: account.id,
         }),
       });
 
@@ -123,7 +123,7 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
       const res = await fetch('/api/update-2fa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rowIndex: account.rowIndex, totpSecret: manualSecret.trim() }),
+        body: JSON.stringify({ id: account.id, totpSecret: manualSecret.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
