@@ -10,6 +10,7 @@ import SettingsModal from '@/components/SettingsModal';
 
 interface MemberActivity {
   name: string;
+  email?: string | null;
   credit: number;
 }
 
@@ -139,6 +140,67 @@ export default function HomePage() {
     }
   };
 
+  const handleExportCSV = async () => {
+    const XLSX = await import('xlsx');
+
+    const headers = ['Service Account Email', 'Member Name', 'Member Email', 'Credit', 'Check At'];
+    const rows: (string | number)[][] = [headers];
+    const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
+
+    let rowIndex = 1; // data starts at row 1 (after header)
+
+    accounts.forEach(account => {
+      const saEmail = account.email;
+      const checkAt = account.lastChecked ? new Date(account.lastChecked).toLocaleString() : '–';
+      const members = account.memberActivities && account.memberActivities.length > 0
+        ? account.memberActivities
+        : null;
+
+      if (members) {
+        const startRow = rowIndex;
+        members.forEach((member, i) => {
+          rows.push([
+            i === 0 ? saEmail : '',
+            member.name || '',
+            member.email || '',
+            member.credit ?? 0,
+            i === 0 ? checkAt : '',
+          ]);
+          rowIndex++;
+        });
+
+        // Merge Service Account Email column (col 0) if multiple members
+        if (members.length > 1) {
+          merges.push({ s: { r: startRow, c: 0 }, e: { r: rowIndex - 1, c: 0 } });
+          // Merge Check At column (col 4) too
+          merges.push({ s: { r: startRow, c: 4 }, e: { r: rowIndex - 1, c: 4 } });
+        }
+      } else {
+        rows.push([saEmail, '', '', '', checkAt]);
+        rowIndex++;
+      }
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Apply column widths
+    ws['!cols'] = [
+      { wch: 35 }, // Service Account Email
+      { wch: 22 }, // Member Name
+      { wch: 30 }, // Member Email
+      { wch: 10 }, // Credit
+      { wch: 22 }, // Check At
+    ];
+
+    // Apply merges
+    ws['!merges'] = merges;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'GG Checks Export');
+
+    XLSX.writeFile(wb, `ggchecks_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   const filtered = accounts.filter(a =>
     a.email.toLowerCase().includes(search.toLowerCase())
   );
@@ -184,6 +246,9 @@ export default function HomePage() {
           <button className="btn btn-secondary" onClick={() => fetchAccounts(true)} disabled={refreshing} title="Refresh accounts">
             <span className={refreshing ? 'spinning' : ''}>↻</span>
             {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button className="btn btn-secondary" onClick={handleExportCSV} disabled={accounts.length === 0} title="Export data to Excel (.xlsx)">
+            📥 Export Excel
           </button>
           <button className="btn btn-secondary" onClick={() => setShowSettings(true)} title="Configuration Settings">
             ⚙️ Settings
