@@ -1,9 +1,7 @@
-import { exec, spawn } from 'child_process';
 import { NextRequest } from 'next/server';
-import { getCheckResultStore, getAccountStore } from '@/lib/store';
-import { getPool } from '@/lib/browser-pool';
-import { getAllConfigs, getConfig } from '@/lib/config';
+import { getAccountStore } from '@/lib/store';
 import { createLogger } from '@/lib/pino-logger';
+import { runCheckWorker } from '@/lib/check-worker';
 
 export const runtime = 'nodejs';
 
@@ -22,12 +20,8 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: 'Account not found' }), { status: 404 });
   }
 
-  const { id, email, password, totpSecret, proxy } = account;
-
-  const encoder    = new TextEncoder();
-  const scriptPath = getConfig('CHECKER_PATH') || `${process.cwd()}/checkOne.ts`;
-  // Bind email + rowIndex to every server-side log for this request.
-  const rlog = log.child({ email, id });
+  const rlog = log.child({ email: account.email, id: account.id });
+  const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -36,118 +30,21 @@ export async function POST(req: NextRequest) {
         catch { /* stream already closed */ }
       };
 
-      let cleanup = () => {};
+      const outcome = await runCheckWorker(
+        account,
+        'gpm',
+        (msg) => send({ type: 'log', message: msg }),
+        rlog,
+      );
 
-      try {
-        send({ type: 'log', message: `Waiting for GPM browser slot...` });
-        const pool = await getPool('gpm');
-        const { port, release } = await pool.acquire(email, proxy ?? null);
-        cleanup = () => release().catch(e => rlog.error('release error', { err: String(e) }));
-
-        send({ type: 'log', message: `Acquired slot on debug port ${port}.` });
-
-        const store = getAccountStore();
-        const familyMembers = await store.getServiceAccountMembers(id);
-        const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port, familyMembers };
-        const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
-        const cmd = `npx tsx "${scriptPath}"`;
-
-        rlog.debug('spawning checker', { port, cmd });
-
-        await new Promise<void>((resolveProc) => {
-          const child = exec(cmd, {
-            env:       env as NodeJS.ProcessEnv,
-            timeout:   120_000,
-            maxBuffer: 10 * 1024 * 1024,
-          });
-
-        // stderr → log events (live streaming)
-        child.stderr?.on('data', (d: string | Buffer) => {
-          const lines = d.toString().split('\n').filter((l: string) => l.trim());
-          for (const line of lines) {
-            send({ type: 'log', message: line });
-          }
-        });
-
-        // stdout → accumulate for final JSON parse
-        let resultBuf = '';
-        child.stdout?.on('data', (d: string | Buffer) => { resultBuf += d.toString(); });
-
-        child.on('error', (err: Error) => {
-          rlog.error('child process error', { err: err.message });
-          send({ type: 'error', message: err.message });
-          resolveProc();
-        });
-
-        child.on('close', async (code: number | null) => {
-          rlog.info('checker exited', { code, stdoutBytes: resultBuf.length });
-          try {
-            const raw = resultBuf.trim();
-            if (!raw) {
-              throw new Error(`Empty stdout from checker (exit ${code})`);
-            }
-            const result = JSON.parse(raw);
-
-            if (result.success) {
-              if (result.familyMembers && Array.isArray(result.familyMembers)) {
-                try {
-                  await getAccountStore().upsertServiceAccountMembers(id, result.familyMembers);
-                } catch (e) {
-                  rlog.error('failed to upsert family members', { err: String(e) });
-                }
-              }
-              try {
-                await getCheckResultStore().updateCreditResult(id, {
-                  monthlyCredits:          result.monthlyCredits          || '',
-                  additionalCredits:       result.additionalCredits       || '',
-                  additionalCreditsExpiry: result.additionalCreditsExpiry || '',
-                  memberActivities:        result.memberActivities        || [],
-                  lastChecked:             result.checkAt                 || new Date().toISOString(),
-                  status:                  'ok',
-                });
-              } catch (saveErr: unknown) {
-                const msg = saveErr instanceof Error ? saveErr.message : 'Unknown';
-                send({ type: 'log', message: `⚠️ Sheet save error: ${msg}` });
-              }
-              send({ type: 'result', data: result });
-            } else {
-              let screenshotUrl: string | undefined;
-              if (result.screenshotPath) {
-                // Just map it directly to the public path
-                screenshotUrl = `/screenshots/${result.screenshotPath.split('/').pop()}`;
-                send({ type: 'log', message: `📸 Screenshot saved locally as ${screenshotUrl}` });
-              }
-
-              await getCheckResultStore().updateCreditResult(id, {
-                monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
-                memberActivities: [], lastChecked: new Date().toISOString(),
-                status: `error: ${result.error}`,
-              }).catch(() => {});
-
-              // We no longer update the sheet with a screenshot URL since we serve it locally.
-              // if (screenshotUrl) {
-              //   await updateErrorScreenshot(rowIndex, screenshotUrl).catch(() => {});
-              // }
-
-              send({ type: 'error', message: result.error, screenshotUrl });
-            }
-          } catch (parseErr) {
-            const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-            const preview = resultBuf.slice(0, 300);
-            send({ type: 'error', message: `${msg}${preview ? ` | stdout: ${preview}` : ''}` });
-          }
-
-          resolveProc();
-        });
-      });
-      } catch (poolErr) {
-        const msg = poolErr instanceof Error ? poolErr.message : String(poolErr);
-        send({ type: 'error', message: msg });
-      } finally {
-        cleanup();
-        send({ type: 'done' });
-        controller.close();
+      if (outcome.success) {
+        send({ type: 'result', data: outcome });
+      } else {
+        send({ type: 'error', message: outcome.error, screenshotUrl: outcome.screenshotUrl });
       }
+
+      send({ type: 'done' });
+      controller.close();
     },
   });
 

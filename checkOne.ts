@@ -390,7 +390,9 @@ async function main(): Promise<void> {
     const scrapedNames = new Set(activityData.memberActivities.map(m => m.name.trim()));
     const knownNames = new Set(familyMembers.map(m => m.name?.trim()).filter(Boolean));
     const hasMismatch = [...scrapedNames].some(name => !knownNames.has(name));
-
+    log(`Scraped names: ${JSON.stringify(scrapedNames)}`);
+    log(`Known names: ${JSON.stringify(knownNames)}`);
+    log(`Has mismatch: ${hasMismatch}`);
     if (hasMismatch && account.familyMembers && account.familyMembers.length > 0) {
       log('Mismatch found between provided members and scraped activity. Re-attaching Playwright to fetch family...');
       const { browser: b2, page: p2 } = await createBrowserCDP(debugPort);

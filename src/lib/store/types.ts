@@ -70,6 +70,15 @@ export interface AccountStore {
    * plumbing, not user-managed configuration that belongs in the Sheet.
    */
   updateAccountProxy(email: string, proxy: string): Promise<void>;
+}
+
+// ── FamilyMemberStore ─────────────────────────────────────────────────────────
+//
+// Owns the service_account_members table.
+// DB-only — family data is discovered at runtime, not managed in Sheet.
+// Writes are skipped when name+email are unchanged (change-detection).
+
+export interface FamilyMemberStore {
   getServiceAccountMembers(id: number): Promise<{ email: string | null; name: string }[]>;
   upsertServiceAccountMembers(id: number, members: { email: string | null; name: string }[]): Promise<void>;
 }

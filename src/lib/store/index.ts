@@ -12,10 +12,11 @@
 import { HybridAccountStore }        from './hybrid.account-store';
 import { PostgresAccountStore }       from './postgres.account-store';
 import { PostgresCheckResultStore }   from './postgres.check-result-store';
-import type { AccountStore, CheckResultStore } from './types';
+import { PostgresFamilyMemberStore }  from './postgres.family-member-store';
+import type { AccountStore, CheckResultStore, FamilyMemberStore } from './types';
 
 // Re-export types so callers can import everything from '@/lib/store'
-export type { AccountStore, CheckResultStore };
+export type { AccountStore, CheckResultStore, FamilyMemberStore };
 export type {
   Account,
   CheckHistoryItem,
@@ -29,8 +30,9 @@ export type {
 
 // ── Singletons ────────────────────────────────────────────────────────────────
 
-let _accountStore: AccountStore | null = null;
-let _checkResultStore: CheckResultStore | null = null;
+let _accountStore:      AccountStore      | null = null;
+let _checkResultStore:  CheckResultStore  | null = null;
+let _familyMemberStore: FamilyMemberStore | null = null;
 
 export function getAccountStore(): AccountStore {
   if (!_accountStore) {
@@ -47,4 +49,11 @@ export function getCheckResultStore(): CheckResultStore {
     _checkResultStore = new PostgresCheckResultStore();
   }
   return _checkResultStore;
+}
+
+export function getFamilyMemberStore(): FamilyMemberStore {
+  if (!_familyMemberStore) {
+    _familyMemberStore = new PostgresFamilyMemberStore();
+  }
+  return _familyMemberStore;
 }

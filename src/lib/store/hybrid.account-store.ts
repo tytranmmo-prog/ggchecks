@@ -127,12 +127,4 @@ export class HybridAccountStore implements AccountStore {
     await db.updateAccountProxy(email, proxy);
     log.info('updateAccountProxy | updated in db', { email });
   }
-
-  async getServiceAccountMembers(id: number): Promise<{ email: string | null; name: string }[]> {
-    return db.getServiceAccountMembers(id);
-  }
-
-  async upsertServiceAccountMembers(id: number, members: { email: string | null; name: string }[]): Promise<void> {
-    return db.upsertServiceAccountMembers(id, members);
-  }
 }
