@@ -123,7 +123,7 @@ export async function fillAndSubmitTOTP(
       }
     }
     if (inputEl) break;
-    await sleep(500);
+    await sleep(1000);
   }
 
   if (!inputEl) throw new Error(`TOTP input not found (${contextLabel})`);
@@ -340,6 +340,7 @@ export async function reVerifyForSensitivePage(
   const body2 = await page.evaluate(() => document.body.innerText).catch(() => '');
   if (url2.includes('signin/challenge') || body2.includes('2-Step') || body2.includes('Enter the code')) {
     log('TOTP challenge for sensitive action...');
+
     await fillAndSubmitTOTP(page, totpSecret, 'sensitive-action');
   }
 

@@ -542,14 +542,14 @@ export default function HomePage() {
       {showBulkCheckSelected && selectedRows.size > 0 && (
         <BulkCheckModal
           accounts={accounts.filter(a => selectedRows.has(a.id))}
-          onClose={() => setShowBulkCheckSelected(false)}
+          onClose={() => { setShowBulkCheckSelected(false); setSelectedRows(new Set()); }}
           onDone={() => { fetchAccounts(true); setSelectedRows(new Set()); }}
         />
       )}
       {showBulkChange2FA && selectedRows.size > 0 && (
         <BulkChange2FAModal
           accounts={accounts.filter(a => selectedRows.has(a.id))}
-          onClose={() => setShowBulkChange2FA(false)}
+          onClose={() => { setShowBulkChange2FA(false); setSelectedRows(new Set()); }}
           onDone={() => { fetchAccounts(true); setSelectedRows(new Set()); }}
         />
       )}
