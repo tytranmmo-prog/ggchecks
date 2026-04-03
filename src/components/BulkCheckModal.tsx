@@ -49,7 +49,7 @@ export default function BulkCheckModal({ accounts, onClose, onDone }: Props) {
       const res = await fetch('/api/bulk-check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts }),
+        body: JSON.stringify({ userEmails: accounts.map(a => a.email) }),
       });
 
       const reader = res.body?.getReader();

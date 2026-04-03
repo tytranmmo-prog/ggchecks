@@ -59,10 +59,7 @@ export default function CheckModal({ account, onClose, onDone, showToast }: Prop
 
     try {
       const body: Record<string, unknown> = {
-        email: account.email,
-        password: account.password,
-        totpSecret: account.totpSecret,
-        id: account.id,
+        userEmail: account.email,
       };
 
       const response = await fetch('/api/check', {

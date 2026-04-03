@@ -211,6 +211,64 @@ export async function getAccountById(id: number): Promise<Account | null> {
   };
 }
 
+export async function getAccountByEmail(email: string): Promise<Account | null> {
+  await ensureSchema();
+  const db = getDb();
+
+  const latestCr = db
+    .selectDistinctOn([checkResults.serviceAccountId], {
+      serviceAccountId:        checkResults.serviceAccountId,
+      monthlyCredits:          checkResults.monthlyCredits,
+      additionalCredits:       checkResults.additionalCredits,
+      additionalCreditsExpiry: checkResults.additionalCreditsExpiry,
+      memberActivities:        checkResults.memberActivities,
+      lastChecked:             checkResults.lastChecked,
+      status:                  checkResults.status,
+      screenshot:              checkResults.screenshot,
+    })
+    .from(checkResults)
+    // We don't have the ID yet to filter check_results here, but we can join and filter later
+    .orderBy(checkResults.serviceAccountId, desc(checkResults.createdAt))
+    .as('latest_cr');
+
+  const rows = await db
+    .select({
+      id:                      serviceAccounts.id,
+      email:                   serviceAccounts.email,
+      password:                serviceAccounts.password,
+      totpSecret:              serviceAccounts.totpSecret,
+      proxy:                   serviceAccounts.proxy,
+      monthlyCredits:          latestCr.monthlyCredits,
+      additionalCredits:       latestCr.additionalCredits,
+      additionalCreditsExpiry: latestCr.additionalCreditsExpiry,
+      memberActivities:        latestCr.memberActivities,
+      lastChecked:             latestCr.lastChecked,
+      status:                  latestCr.status,
+      screenshot:              latestCr.screenshot,
+    })
+    .from(serviceAccounts)
+    .leftJoin(latestCr, eq(serviceAccounts.id, latestCr.serviceAccountId))
+    .where(eq(serviceAccounts.email, email))
+    .limit(1);
+
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    id:                      r.id,
+    email:                   r.email,
+    password:                r.password,
+    totpSecret:              r.totpSecret,
+    proxy:                   r.proxy,
+    monthlyCredits:          r.monthlyCredits          ?? '',
+    additionalCredits:       r.additionalCredits       ?? '',
+    additionalCreditsExpiry: r.additionalCreditsExpiry ?? '',
+    memberActivities:        (r.memberActivities as MemberActivity[]) ?? [],
+    lastChecked:             toIso(r.lastChecked),
+    status:                  r.status                  ?? 'pending',
+    screenshot:              r.screenshot              ?? '',
+  };
+}
+
 export async function addAccount(account: {
   email:      string;
   password:   string;

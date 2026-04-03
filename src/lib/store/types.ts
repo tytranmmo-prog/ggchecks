@@ -55,6 +55,7 @@ export interface MemberCreditTotal {
 export interface AccountStore {
   getAccounts(): Promise<Account[]>;
   getAccountById(id: number): Promise<Account | null>;
+  getAccountByEmail(email: string): Promise<Account | null>;
   addAccount(data: {
     email:      string;
     password:   string;

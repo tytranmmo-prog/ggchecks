@@ -35,6 +35,10 @@ export class HybridAccountStore implements AccountStore {
     return db.getAccountById(id);
   }
 
+  getAccountByEmail(email: string): Promise<Account | null> {
+    return db.getAccountByEmail(email);
+  }
+
   // ── Writes (Sheet first → DB second) ─────────────────────────────────────────
 
   async addAccount(data: {

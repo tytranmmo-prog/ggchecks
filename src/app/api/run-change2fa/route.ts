@@ -11,11 +11,18 @@ const log = createLogger('2fa');
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, id, proxy, poolType: rawPoolType } = body;
+  const { userEmail, poolType: rawPoolType } = body;
 
-  if (!email || !password || !totpSecret || !id) {
-    return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
+  if (!userEmail) {
+    return new Response(JSON.stringify({ error: 'Missing userEmail' }), { status: 400 });
   }
+
+  const account = await getAccountStore().getAccountByEmail(userEmail);
+  if (!account) {
+    return new Response(JSON.stringify({ error: 'Account not found' }), { status: 404 });
+  }
+
+  const { id, email, password, totpSecret, proxy } = account;
 
   // Resolve pool type — default to 'gpm' to match bulk-check behaviour.
   const poolType: PoolType =

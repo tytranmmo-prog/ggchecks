@@ -11,11 +11,18 @@ const log = createLogger('check');
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, id, proxy } = body;
+  const { userEmail } = body;
 
-  if (!email || !password || !totpSecret || !id) {
-    return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
+  if (!userEmail) {
+    return new Response(JSON.stringify({ error: 'Missing userEmail' }), { status: 400 });
   }
+
+  const account = await getAccountStore().getAccountByEmail(userEmail);
+  if (!account) {
+    return new Response(JSON.stringify({ error: 'Account not found' }), { status: 404 });
+  }
+
+  const { id, email, password, totpSecret, proxy } = account;
 
   const encoder    = new TextEncoder();
   const scriptPath = getConfig('CHECKER_PATH') || `${process.cwd()}/checkOne.ts`;

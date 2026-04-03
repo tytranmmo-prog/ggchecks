@@ -18,6 +18,10 @@ export class PostgresAccountStore implements AccountStore {
     return db.getAccountById(id);
   }
 
+  getAccountByEmail(email: string): Promise<Account | null> {
+    return db.getAccountByEmail(email);
+  }
+
   addAccount(data: { email: string; password: string; totpSecret: string; proxy?: string }): Promise<void> {
     return db.addAccount(data);
   }

@@ -62,7 +62,7 @@ export default function BulkChange2FAModal({ accounts, onClose, onDone }: Props)
       const res = await fetch('/api/bulk-change2fa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts, poolType: 'gpm' }),
+        body: JSON.stringify({ userEmails: accounts.map(a => a.email), poolType: 'gpm' }),
       });
 
       const reader = res.body?.getReader();

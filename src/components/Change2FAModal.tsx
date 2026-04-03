@@ -61,10 +61,7 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: account.email,
-          password: account.password,
-          totpSecret: account.totpSecret,
-          id: account.id,
+          userEmail: account.email,
           poolType: 'gpm',
         }),
       });

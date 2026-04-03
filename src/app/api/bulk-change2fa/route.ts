@@ -1,6 +1,7 @@
 import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
 import { getAccountStore } from '@/lib/store';
+import type { Account } from '@/lib/store';
 import { getPool, type PoolType } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
@@ -14,20 +15,12 @@ function randomRunId(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
-interface AccountInput {
-  id: number;
-  email: string;
-  password: string;
-  totpSecret: string;
-  proxy?: string | null;
-}
-
 // ── runChange2FA ──────────────────────────────────────────────────────────────
 // Spawns change2fa.ts with a CDP port injected, collects per-line stderr logs
 // via onLog callback, and resolves with the final JSON stdout.
 
 function runChange2FA(
-  account: AccountInput,
+  account: Account,
   debugPort: number,
   scriptPath: string,
   alog: ILogger,
@@ -72,19 +65,26 @@ function runChange2FA(
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const accounts: AccountInput[] = body.accounts;
+  const userEmails: string[] = body.userEmails ?? [];
   const poolType: PoolType =
     body.poolType === 'persistent' ? 'persistent'
     : body.poolType === 'ephemeral' ? 'ephemeral'
     : 'gpm';
 
   const runId = randomRunId();
-  const rlog = log.child({ runId, poolType, total: accounts?.length ?? 0 });
+  const rlog = log.child({ runId, poolType, total: userEmails.length });
 
-  rlog.info('request received', { accountCount: accounts?.length ?? 0, poolType });
+  rlog.info('request received', { accountCount: userEmails.length, poolType });
 
-  if (!accounts?.length) {
-    return new Response(JSON.stringify({ error: 'No accounts' }), { status: 400 });
+  if (!userEmails.length) {
+    return new Response(JSON.stringify({ error: 'No userEmails provided' }), { status: 400 });
+  }
+
+  const allAccounts = await getAccountStore().getAccounts();
+  const accounts = allAccounts.filter(a => userEmails.includes(a.email));
+
+  if (!accounts.length) {
+    return new Response(JSON.stringify({ error: 'No accounts found' }), { status: 404 });
   }
 
   const encoder    = new TextEncoder();
