@@ -1,6 +1,6 @@
 import { exec, spawn } from 'child_process';
 import { NextRequest } from 'next/server';
-import { getCheckResultStore } from '@/lib/store';
+import { getCheckResultStore, getAccountStore } from '@/lib/store';
 import { getPool } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
@@ -39,7 +39,9 @@ export async function POST(req: NextRequest) {
 
         send({ type: 'log', message: `Acquired slot on debug port ${port}.` });
 
-        const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port };
+        const store = getAccountStore();
+        const familyMembers = await store.getServiceAccountMembers(id);
+        const accountData: Record<string, unknown> = { email, password, totpSecret, debugPort: port, familyMembers };
         const env = { ...process.env, ...getAllConfigs(), ACCOUNT_JSON: JSON.stringify(accountData) };
         const cmd = `npx tsx "${scriptPath}"`;
 
@@ -80,6 +82,13 @@ export async function POST(req: NextRequest) {
             const result = JSON.parse(raw);
 
             if (result.success) {
+              if (result.familyMembers && Array.isArray(result.familyMembers)) {
+                try {
+                  await getAccountStore().upsertServiceAccountMembers(id, result.familyMembers);
+                } catch (e) {
+                  rlog.error('failed to upsert family members', { err: String(e) });
+                }
+              }
               try {
                 await getCheckResultStore().updateCreditResult(id, {
                   monthlyCredits:          result.monthlyCredits          || '',

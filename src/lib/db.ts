@@ -2,7 +2,7 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { and, asc, desc, eq, lt, sql } from 'drizzle-orm';
 import * as schema from './schema';
-import { serviceAccounts, checkResults } from './schema';
+import { serviceAccounts, checkResults, serviceAccountMembers } from './schema';
 import type { MemberActivity } from './schema';
 import { createLogger } from './pino-logger';
 
@@ -226,6 +226,36 @@ export async function addAccount(account: {
     ...(account.proxy ? { proxy: account.proxy } : {}),
   });
   log.info('account added', { email: account.email });
+}
+
+export async function getServiceAccountMembers(serviceAccountId: number): Promise<{ email: string | null; name: string }[]> {
+  await ensureSchema();
+  const db = getDb();
+  return db
+    .select({ email: serviceAccountMembers.email, name: serviceAccountMembers.name })
+    .from(serviceAccountMembers)
+    .where(eq(serviceAccountMembers.serviceAccountId, serviceAccountId));
+}
+
+export async function upsertServiceAccountMembers(
+  serviceAccountId: number,
+  members: { email: string | null; name: string }[]
+): Promise<void> {
+  await ensureSchema();
+  const db = getDb();
+  await db.transaction(async (tx) => {
+    await tx.delete(serviceAccountMembers).where(eq(serviceAccountMembers.serviceAccountId, serviceAccountId));
+    if (members.length > 0) {
+      await tx.insert(serviceAccountMembers).values(
+        members.map((m) => ({
+          serviceAccountId,
+          email: m.email,
+          name: m.name,
+        }))
+      );
+    }
+  });
+  log.info('account members upserted', { serviceAccountId, count: members.length });
 }
 
 /** Appends a new check_result row — full history preserved. */

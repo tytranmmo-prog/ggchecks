@@ -1,6 +1,6 @@
 import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
-import { getCheckResultStore } from '@/lib/store';
+import { getCheckResultStore, getAccountStore } from '@/lib/store';
 import type { MemberActivity } from '@/lib/store';
 import { getPool, type PoolType } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
@@ -23,6 +23,7 @@ interface AccountInput {
   password: string;
   totpSecret: string;
   proxy?: string | null;
+  familyMembers?: { email: string | null; name: string }[];
 }
 
 // ── runCheck ──────────────────────────────────────────────────────────────────
@@ -108,6 +109,8 @@ export async function POST(req: NextRequest) {
         let port: number | undefined;
 
         try {
+          const familyMembers = await getAccountStore().getServiceAccountMembers(account.id).catch(() => []);
+          account.familyMembers = familyMembers;
           ({ port, release } = await pool.acquire(account.email, account.proxy ?? null));
           alog.info('account task | slot acquired', { port });
           send({ type: 'account_start', id: account.id, email: account.email, port });
@@ -124,6 +127,11 @@ export async function POST(req: NextRequest) {
 
           if (result.success) {
             const memberActivities = (result.memberActivities ?? []) as MemberActivity[];
+
+            if (result.familyMembers && Array.isArray(result.familyMembers)) {
+              await getAccountStore().upsertServiceAccountMembers(account.id, result.familyMembers)
+                .catch(e => alog.error('failed to upsert family members', { err: String(e) }));
+            }
 
             await getCheckResultStore().updateCreditResult(account.id, {
               monthlyCredits:          String(result.monthlyCredits          ?? ''),

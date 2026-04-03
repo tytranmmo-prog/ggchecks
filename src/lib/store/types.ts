@@ -69,6 +69,8 @@ export interface AccountStore {
    * plumbing, not user-managed configuration that belongs in the Sheet.
    */
   updateAccountProxy(email: string, proxy: string): Promise<void>;
+  getServiceAccountMembers(id: number): Promise<{ email: string | null; name: string }[]>;
+  upsertServiceAccountMembers(id: number, members: { email: string | null; name: string }[]): Promise<void>;
 }
 
 // ── CheckResultStore ──────────────────────────────────────────────────────────

@@ -16,6 +16,25 @@ export interface MemberActivity {
   credit: number;
 }
 
+// ── service_account_members ───────────────────────────────────────────────────
+
+export const serviceAccountMembers = pgTable(
+  'service_account_members',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    serviceAccountId: bigint('service_account_id', { mode: 'number' })
+      .notNull()
+      .references(() => serviceAccounts.id, { onDelete: 'cascade' }),
+    email: text('email'),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('sa_members_sa_id_idx').on(t.serviceAccountId),
+  ]
+);
+
 // ── service_accounts ─────────────────────────────────────────────────────────
 
 export const serviceAccounts = pgTable('service_accounts', {

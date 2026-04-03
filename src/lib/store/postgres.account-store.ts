@@ -33,4 +33,12 @@ export class PostgresAccountStore implements AccountStore {
   updateAccountProxy(email: string, proxy: string): Promise<void> {
     return db.updateAccountProxy(email, proxy);
   }
+
+  getServiceAccountMembers(id: number): Promise<{ email: string | null; name: string }[]> {
+    return db.getServiceAccountMembers(id);
+  }
+
+  upsertServiceAccountMembers(id: number, members: { email: string | null; name: string }[]): Promise<void> {
+    return db.upsertServiceAccountMembers(id, members);
+  }
 }

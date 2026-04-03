@@ -47,3 +47,5 @@ next-env.d.ts
 public/screenshots/
 # App logs
 logs/
+
+runtime-config.json

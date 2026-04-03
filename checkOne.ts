@@ -250,8 +250,10 @@ async function main(): Promise<void> {
     password:     string;
     totpSecret:   string;
     debugPort?:   number;
+    familyMembers?: FamilyMember[];
   };
   const { email, password, totpSecret, debugPort } = account;
+  let familyMembers = account.familyMembers || [];
 
   // ── Standalone mode (no pool) ──────────────────────────────────────────────
   if (!debugPort) {
@@ -264,8 +266,12 @@ async function main(): Promise<void> {
       await ensureLoggedIn(page, email, password, totpSecret);
 
       // ── 2. Fetch family members while still authenticated ───────────────────
-      log('Fetching family members...');
-      const familyMembers = await getFamilyMembers(page);
+      if (familyMembers.length === 0) {
+        log('Fetching family members...');
+        familyMembers = await getFamilyMembers(page);
+      } else {
+        log('Family members provided, skipping fetch.');
+      }
 
       // ── 3. Navigate to activity page and scrape ─────────────────────────────
       log('Navigating to activity page...');
@@ -281,6 +287,15 @@ async function main(): Promise<void> {
       }
 
       const activityData = await page.evaluate(SCRAPE_JS) as ActivityData;
+
+      const scrapedNames = new Set(activityData.memberActivities.map(m => m.name.trim()));
+      const knownNames = new Set(familyMembers.map(m => m.name?.trim()).filter(Boolean));
+      const hasMismatch = [...scrapedNames].some(name => !knownNames.has(name));
+
+      if (hasMismatch && account.familyMembers && account.familyMembers.length > 0) {
+        log('Mismatch found between provided members and scraped activity. Fetching family members...');
+        familyMembers = await getFamilyMembers(page);
+      }
 
       // ── 4. Build enriched result ─────────────────────────────────────────────
       const checkAt = new Date().toISOString();
@@ -322,8 +337,6 @@ async function main(): Promise<void> {
   //          While Playwright is alive we grab the full family roster.
   // Phase 2: Raw CDP   — navigate + scrape activity page (no automation fingerprint).
 
-  let familyMembers: FamilyMember[] = [];
-
   try {
     // ── Phase 1 ───────────────────────────────────────────────────────────────
     {
@@ -340,9 +353,13 @@ async function main(): Promise<void> {
         }
 
         // Fetch family members while Playwright is still connected
-        log('Fetching family members (Phase 1)...');
-        familyMembers = await getFamilyMembers(page);
-        log(`Got ${familyMembers.length} family member(s).`);
+        if (familyMembers.length === 0) {
+          log('Fetching family members (Phase 1)...');
+          familyMembers = await getFamilyMembers(page);
+          log(`Got ${familyMembers.length} family member(s).`);
+        } else {
+          log('Family members provided, skipping Phase 1 fetch.');
+        }
 
       } catch (loginErr) {
         try {
@@ -369,6 +386,28 @@ async function main(): Promise<void> {
     }
 
     const activityData = await scrapeActivityPage(debugPort);
+
+    const scrapedNames = new Set(activityData.memberActivities.map(m => m.name.trim()));
+    const knownNames = new Set(familyMembers.map(m => m.name?.trim()).filter(Boolean));
+    const hasMismatch = [...scrapedNames].some(name => !knownNames.has(name));
+
+    if (hasMismatch && account.familyMembers && account.familyMembers.length > 0) {
+      log('Mismatch found between provided members and scraped activity. Re-attaching Playwright to fetch family...');
+      const { browser: b2, page: p2 } = await createBrowserCDP(debugPort);
+      try {
+        familyMembers = await getFamilyMembers(p2);
+        log(`Re-fetched ${familyMembers.length} family member(s).`);
+        
+        // Ensure we're not stuck on auth page or family page after fetching
+        const p2Url = p2.url();
+        if (p2Url.includes('accounts.google.com')) {
+          throw new Error(`Still on auth page after re-fetching family: ${p2Url}`);
+        }
+      } finally {
+        await b2.close();
+      }
+    }
+
     const checkAt      = new Date().toISOString();
 
     const result: CheckResult = {
