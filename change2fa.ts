@@ -19,7 +19,7 @@
 import { Jimp } from 'jimp';
 import jsQR from 'jsqr';
 import type { Page } from 'playwright';
-import { sleep, log, generateTOTP, createBrowser, googleLogin, reVerifyForSensitivePage } from './google-auth';
+import { sleep, log, generateTOTP, createBrowser, createBrowserCDP, googleLogin, ensureLoggedIn, reVerifyForSensitivePage } from './google-auth';
 
 const AUTHENTICATOR_URL = 'https://myaccount.google.com/two-step-verification/authenticator';
 const TIMEOUT = 60_000;
@@ -503,12 +503,15 @@ async function verifyNewSecret(page: Page, newTotpSecret: string): Promise<void>
     log(`Attempt ${attempt + 1} rejected by Google. Waiting for next TOTP window...`);
     if (attempt < 2) await waitForFreshTOTPWindow();
   }
+
+  throw new Error('TOTP verification rejected by Google after 3 attempts');
 }
 
 async function waitForFreshTOTPWindow(): Promise<void> {
   const secondsInWindow = Math.floor(Date.now() / 1000) % 30;
   const remaining = 30 - secondsInWindow;
-  if (remaining < 8) {
+  // Keep a 12-second buffer so the code can't expire mid-round-trip
+  if (remaining < 12) {
     log(`Waiting ${remaining + 1}s for fresh TOTP window...`);
     await sleep((remaining + 1) * 1000);
   } else {
@@ -527,7 +530,8 @@ async function confirmSuccess(page: Page): Promise<void> {
   log(`[DEBUG] confirmSuccess — URL: ${url}`);
   log(`[DEBUG] confirmSuccess — page (first 400): ${bodyText.slice(0, 400)}`);
 
-  const hasError = /wrong|incorrect|invalid code|that code|error/i.test(bodyText.slice(0, 1000));
+  // Match only explicit Google error phrases — avoid matching 'error' in JS/HTML source
+  const hasError = /wrong code|incorrect code|invalid code|that code didn't work|something went wrong|an error occurred|couldn't verify/i.test(bodyText.slice(0, 1000));
   if (hasError) throw new Error('Verification failed — Google reported an error');
 
   const modalStillOpen = bodyText.includes('Enter the 6-digit') || bodyText.includes('Enter Code');
@@ -547,22 +551,32 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const account = JSON.parse(accountArg) as { email: string; password: string; totpSecret: string };
-  const { email, password, totpSecret } = account;
+  const account = JSON.parse(accountArg) as {
+    email:      string;
+    password:   string;
+    totpSecret: string;
+    debugPort?: number;
+  };
+  const { email, password, totpSecret, debugPort } = account;
   if (!email || !password || !totpSecret) {
     throw new Error('account JSON must include email, password, totpSecret');
   }
 
-  const { browser, context, page } = await createBrowser();
+  // If a debugPort is provided the caller (API route) has already acquired a
+  // GPMLogin browser handle for us. We just attach via CDP and let GPMLogin
+  // own the process lifecycle — so on exit we only disconnect, not kill.
+  const useCdp = typeof debugPort === 'number' && debugPort > 0;
+  log(`Mode: ${useCdp ? `CDP (port ${debugPort})` : 'standalone'}`);
+
+  const { browser, context, page } = useCdp
+    ? await createBrowserCDP(debugPort!)
+    : await createBrowser();
 
   try {
     const SECURITY_URL = 'https://myaccount.google.com/security';
     await page.goto(SECURITY_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
     await sleep(1500);
-
-    if (page.url().includes('accounts.google.com')) {
-      await googleLogin(page, email, password, totpSecret);
-    }
+    await ensureLoggedIn(page, email, password, totpSecret);
 
     await navigateToAuthenticatorPage(page, email, password, totpSecret);
     await clickChangeAuthenticator(page);
@@ -586,8 +600,14 @@ async function main(): Promise<void> {
     const result: Change2FAError = { success: false, account: email, error };
     process.stdout.write(JSON.stringify(result) + '\n');
   } finally {
-    await context.close();
-    await browser.close();
+    if (useCdp) {
+      // Disconnect Playwright only — GPMLogin stops the actual browser process
+      // when the API route calls handle.release().
+      await browser.close();
+    } else {
+      await context.close();
+      await browser.close();
+    }
   }
 }
 

@@ -19,7 +19,7 @@
  */
 
 import { writeFileSync, mkdirSync } from 'fs';
-import { sleep, log, createBrowser, createBrowserCDP, googleLogin, fillAndSubmitTOTP } from './google-auth';
+import { sleep, log, createBrowser, createBrowserCDP, ensureLoggedIn, fillAndSubmitTOTP } from './google-auth';
 import { getFamilyMembers } from './checkFamily';
 import type { FamilyMember } from './checkFamily';
 
@@ -261,10 +261,7 @@ async function main(): Promise<void> {
       // ── 1. Login ────────────────────────────────────────────────────────────
       await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
       await sleep(1500);
-      if (page.url().includes('accounts.google.com')) {
-        await googleLogin(page, email, password, totpSecret);
-        await sleep(1000);
-      }
+      await ensureLoggedIn(page, email, password, totpSecret);
 
       // ── 2. Fetch family members while still authenticated ───────────────────
       log('Fetching family members...');
@@ -276,15 +273,11 @@ async function main(): Promise<void> {
       await sleep(2000);
 
       // Google may issue a TOTP re-challenge when crossing from myaccount → one.google.com
+      await ensureLoggedIn(page, email, password, totpSecret);
       if (page.url().includes('accounts.google.com')) {
-        log('TOTP re-challenge after family fetch — re-authenticating...');
-        await fillAndSubmitTOTP(page, totpSecret, 'activity-re-auth');
-        await sleep(1500);
-        // If still stuck, navigate again
-        if (page.url().includes('accounts.google.com')) {
-          await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
-          await sleep(2000);
-        }
+        // Still stuck — navigate again
+        await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+        await sleep(2000);
       }
 
       const activityData = await page.evaluate(SCRAPE_JS) as ActivityData;
@@ -342,10 +335,8 @@ async function main(): Promise<void> {
         await sleep(1500);
 
         if (page.url().includes('accounts.google.com')) {
-          await googleLogin(page, email, password, totpSecret);
-          log('Login complete.');
-        } else {
-          log('Session cache hit — login skipped.');
+          const loginResult = await ensureLoggedIn(page, email, password, totpSecret);
+          log(loginResult === 'logged_in' ? 'Login complete.' : 'Session cache hit — login skipped.');
         }
 
         // Fetch family members while Playwright is still connected

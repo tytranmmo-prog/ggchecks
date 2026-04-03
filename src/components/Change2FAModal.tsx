@@ -64,7 +64,8 @@ export default function Change2FAModal({ account, onClose, onSaved, showToast }:
           email: account.email,
           password: account.password,
           totpSecret: account.totpSecret,
-          rowIndex: account.id,
+          id: account.id,
+          poolType: 'gpm',
         }),
       });
 

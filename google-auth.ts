@@ -6,8 +6,10 @@
  *   log(msg)
  *   generateTOTP(secret)
  *   createBrowser()                                        → { browser, context, page }
+ *   createBrowserCDP(port)                                 → { browser, context, page }
  *   fillAndSubmitTOTP(page, secret, label?)
  *   googleLogin(page, email, password, totpSecret)
+ *   ensureLoggedIn(page, email, password, totpSecret)      → 'logged_in' | 'cache_hit'
  *   reVerifyForSensitivePage(page, email, password, totpSecret, targetUrl?)
  */
 
@@ -257,6 +259,43 @@ async function dismissPasskeyPrompt(page: Page): Promise<void> {
   } catch {
     // Non-fatal — if dismissal fails, the outer URL check will catch it
   }
+}
+
+// ──────────────────────────────────────────────
+// Ensure logged in
+// Single canonical check: if the page is on an
+// auth screen run a full login, otherwise log a
+// session-cache-hit and return immediately.
+// ──────────────────────────────────────────────
+
+/**
+ * Checks whether the browser is currently on a Google auth page.
+ *
+ *   - If YES  → calls googleLogin() to complete the full sign-in flow.
+ *   - If NO   → the session cookie is still valid; logs and returns early.
+ *
+ * Returns 'logged_in' when a fresh login was performed,
+ *         'cache_hit'  when the existing session was reused.
+ *
+ * @example
+ *   await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
+ *   await sleep(1500);
+ *   await ensureLoggedIn(page, email, password, totpSecret);
+ */
+export async function ensureLoggedIn(
+  page: Page,
+  email: string,
+  password: string,
+  totpSecret: string,
+): Promise<'logged_in' | 'cache_hit'> {
+  if (!page.url().includes('accounts.google.com')) {
+    log(`Auth check: session cache hit for ${email} — already signed in.`);
+    return 'cache_hit';
+  }
+
+  log(`Auth check: on Google auth page — signing in as ${email}...`);
+  await googleLogin(page, email, password, totpSecret);
+  return 'logged_in';
 }
 
 // ──────────────────────────────────────────────

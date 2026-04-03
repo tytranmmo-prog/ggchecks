@@ -6,6 +6,7 @@ import CheckHistoryModal from '@/components/CheckHistoryModal';
 import Change2FAModal from '@/components/Change2FAModal';
 import AddAccountModal from '@/components/AddAccountModal';
 import BulkCheckModal from '@/components/BulkCheckModal';
+import BulkChange2FAModal from '@/components/BulkChange2FAModal';
 import SettingsModal from '@/components/SettingsModal';
 
 interface MemberActivity {
@@ -54,6 +55,7 @@ export default function HomePage() {
   const [resettingProfile, setResettingProfile] = useState<number | null>(null);
   const [resettingAll, setResettingAll] = useState(false);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [showBulkChange2FA, setShowBulkChange2FA] = useState(false);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -286,13 +288,22 @@ export default function HomePage() {
             ⚡ Check All ({accounts.length})
           </button>
           {selectedRows.size > 0 && (
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowBulkCheckSelected(true)}
-              title="Check only selected accounts"
-            >
-              ☑ Check Selected ({selectedRows.size})
-            </button>
+            <>
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowBulkCheckSelected(true)}
+                title="Check only selected accounts"
+              >
+                ☑ Check Selected ({selectedRows.size})
+              </button>
+              <button
+                className="btn btn-warning"
+                onClick={() => setShowBulkChange2FA(true)}
+                title="Rotate 2FA secret for selected accounts"
+              >
+                🔐 Rotate 2FA ({selectedRows.size})
+              </button>
+            </>
           )}
           <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
             ➕ Add Account
@@ -486,6 +497,13 @@ export default function HomePage() {
         <BulkCheckModal
           accounts={accounts.filter(a => selectedRows.has(a.id))}
           onClose={() => setShowBulkCheckSelected(false)}
+          onDone={() => { fetchAccounts(true); setSelectedRows(new Set()); }}
+        />
+      )}
+      {showBulkChange2FA && selectedRows.size > 0 && (
+        <BulkChange2FAModal
+          accounts={accounts.filter(a => selectedRows.has(a.id))}
+          onClose={() => setShowBulkChange2FA(false)}
           onDone={() => { fetchAccounts(true); setSelectedRows(new Set()); }}
         />
       )}
