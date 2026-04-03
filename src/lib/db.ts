@@ -45,11 +45,11 @@ export async function ensureSchema() {
   const res = await db.execute(sql`
     SELECT COUNT(*) AS n FROM information_schema.tables
     WHERE table_schema = 'public'
-      AND table_name IN ('service_accounts', 'check_results')
+      AND table_name IN ('service_accounts', 'check_results', 'service_account_members')
   `);
-  if (Number(res[0].n) < 2) {
+  if (Number(res[0].n) < 3) {
     throw new Error(
-      'Database tables are missing. Run the migration script first.',
+      'Database tables are missing. Run: bun run db:migrate',
     );
   }
   schemaVerified = true;
