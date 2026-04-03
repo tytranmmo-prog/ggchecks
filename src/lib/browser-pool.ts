@@ -43,10 +43,10 @@ export interface BrowserPool {
    * Wait for a free slot, then launch Chrome with a profile tied to `email`.
    * Resolves with a handle once Chrome's CDP endpoint is ready.
    *
-   * The profile directory is preserved across runs so the Google session
-   * (cookies, storage) is cached and login is not repeated unnecessarily.
+   * Pass `proxy` when the account already has an assigned proxy (e.g. from DB).
+   * When omitted the pool falls back to its auto-generation strategy.
    */
-  acquire(email: string): Promise<BrowserHandle>;
+  acquire(email: string, proxy?: string | null): Promise<BrowserHandle>;
 }
 
 // ─── Runtime factory ──────────────────────────────────────────────────────────
@@ -107,8 +107,16 @@ export async function getPool(type: PoolType = 'ephemeral'): Promise<BrowserPool
     const { PersistentChromePool } = await import('./chrome-pool');
     pool = new PersistentChromePool(config);
   } else if (type === 'gpm') {
-    const { GpmProfilePool } = await import('./gpm-profile-pool');
-    pool = new GpmProfilePool(config);
+    const { GpmProfilePool }  = await import('./gpm-profile-pool');
+    const { getAccountStore }  = await import('./store');
+    const store = getAccountStore();
+    pool = new GpmProfilePool(
+      config,
+      // onProxyAssigned — called whenever a NEW auto-generated proxy is saved
+      (email, proxy) => store.updateAccountProxy(email, proxy),
+      // onProxyChanged  — called whenever an EXISTING proxy is updated to a new value
+      (email, proxy) => store.updateAccountProxy(email, proxy),
+    );
   } else {
     const { CachedProfilePool } = await import('./chrome-profile-pool');
     pool = new CachedProfilePool(config);

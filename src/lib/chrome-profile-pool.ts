@@ -97,7 +97,8 @@ export class CachedProfilePool implements BrowserPool {
 
   // ── acquire ────────────────────────────────────────────────────────────────
 
-  acquire(email: string): Promise<BrowserHandle> {
+  // proxy ignored — CachedProfilePool manages its own sidecar proxy
+  acquire(email: string, _proxy?: string | null): Promise<BrowserHandle> {
     // We create a deferred promise that only resolves when release() is called.
     // p-limit's task wraps this deferred, so the concurrency slot stays occupied
     // for the full duration of the Chrome session — not just during startup.

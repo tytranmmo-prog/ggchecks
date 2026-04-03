@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { update2FASecret } from '@/lib/db';
+import { getAccountStore } from '@/lib/store';
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,11 +10,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'id and totpSecret are required' }, { status: 400 });
     }
 
-    await update2FASecret(id, totpSecret);
+    await getAccountStore().update2FASecret(id, totpSecret);
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

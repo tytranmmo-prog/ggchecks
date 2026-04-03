@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
 import { exec } from 'child_process';
-import { update2FASecret } from '@/lib/db';
-import { getAccounts as getSheetAccounts, update2FASecret as updateSheetSecret } from '@/lib/sheets';
+import { getAccountStore } from '@/lib/store';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
 import { getPool, type PoolType } from '@/lib/browser-pool';
@@ -12,7 +11,7 @@ const log = createLogger('2fa');
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, id, poolType: rawPoolType } = body;
+  const { email, password, totpSecret, id, proxy, poolType: rawPoolType } = body;
 
   if (!email || !password || !totpSecret || !id) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
@@ -47,7 +46,7 @@ export async function POST(req: NextRequest) {
           send({ type: 'log', message: `🌐 Acquiring ${poolType} browser profile...` });
           const pool = await getPool(poolType);
           rlog.info('pool ready', { type: pool.type, concurrency: pool.concurrency });
-          handle = await pool.acquire(email);
+          handle = await pool.acquire(email, proxy ?? null);
           rlog.info('browser handle acquired', { port: handle.port });
           send({ type: 'log', message: `✅ Browser ready on port ${handle.port}` });
         } catch (poolErr: unknown) {
@@ -109,31 +108,13 @@ export async function POST(req: NextRequest) {
             if (result.success) {
               rlog.info('2fa rotation succeeded', { newSecret: result.newTotpSecret ? '***' : 'none' });
               try {
-                await update2FASecret(id, result.newTotpSecret);
-                send({ type: 'log', message: `✅ New secret saved to DB: ${result.newTotpSecret}` });
+                // HybridAccountStore handles Sheet + DB sync internally
+                await getAccountStore().update2FASecret(id, result.newTotpSecret);
+                send({ type: 'log', message: `✅ New secret saved (sheet + db): ${result.newTotpSecret}` });
               } catch (saveErr: unknown) {
                 const msg = saveErr instanceof Error ? saveErr.message : 'Unknown';
-                rlog.error('db save error', { err: msg });
-                send({ type: 'log', message: `⚠️ DB save error: ${msg}` });
-              }
-
-              // Sync new secret to Google Sheet (non-fatal)
-              try {
-                send({ type: 'log', message: `🔄 Syncing new secret to Google Sheet...` });
-                const sheetAccounts = await getSheetAccounts();
-                const sheetRow = sheetAccounts.find(a => a.email === email);
-                if (sheetRow) {
-                  await updateSheetSecret(sheetRow.rowIndex, result.newTotpSecret);
-                  rlog.info('sheet secret synced', { email, rowIndex: sheetRow.rowIndex });
-                  send({ type: 'log', message: `✅ Google Sheet updated (row ${sheetRow.rowIndex})` });
-                } else {
-                  rlog.warn('account not found in sheet — skipping sheet sync', { email });
-                  send({ type: 'log', message: `⚠️ Account not found in Google Sheet — skipped sheet sync` });
-                }
-              } catch (sheetErr: unknown) {
-                const msg = sheetErr instanceof Error ? sheetErr.message : 'Unknown';
-                rlog.warn('sheet sync failed (non-fatal)', { err: msg });
-                send({ type: 'log', message: `⚠️ Sheet sync failed (non-fatal): ${msg}` });
+                rlog.error('store save error', { err: msg });
+                send({ type: 'log', message: `⚠️ Save error: ${msg}` });
               }
 
               send({ type: 'result', data: result });

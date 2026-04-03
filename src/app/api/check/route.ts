@@ -1,6 +1,6 @@
 import { exec, spawn } from 'child_process';
 import { NextRequest } from 'next/server';
-import { updateCreditResult } from '@/lib/db';
+import { getCheckResultStore } from '@/lib/store';
 import { getPool } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
@@ -11,7 +11,7 @@ const log = createLogger('check');
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { email, password, totpSecret, id } = body;
+  const { email, password, totpSecret, id, proxy } = body;
 
   if (!email || !password || !totpSecret || !id) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       try {
         send({ type: 'log', message: `Waiting for GPM browser slot...` });
         const pool = await getPool('gpm');
-        const { port, release } = await pool.acquire(email);
+        const { port, release } = await pool.acquire(email, proxy ?? null);
         cleanup = () => release().catch(e => rlog.error('release error', { err: String(e) }));
 
         send({ type: 'log', message: `Acquired slot on debug port ${port}.` });
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
 
             if (result.success) {
               try {
-                await updateCreditResult(id, {
+                await getCheckResultStore().updateCreditResult(id, {
                   monthlyCredits:          result.monthlyCredits          || '',
                   additionalCredits:       result.additionalCredits       || '',
                   additionalCreditsExpiry: result.additionalCreditsExpiry || '',
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
                 send({ type: 'log', message: `📸 Screenshot saved locally as ${screenshotUrl}` });
               }
 
-              await updateCreditResult(id, {
+              await getCheckResultStore().updateCreditResult(id, {
                 monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
                 memberActivities: [], lastChecked: new Date().toISOString(),
                 status: `error: ${result.error}`,

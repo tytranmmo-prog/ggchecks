@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import CheckModal from '@/components/CheckModal';
 import CheckHistoryModal from '@/components/CheckHistoryModal';
 import Change2FAModal from '@/components/Change2FAModal';
@@ -8,6 +8,7 @@ import AddAccountModal from '@/components/AddAccountModal';
 import BulkCheckModal from '@/components/BulkCheckModal';
 import BulkChange2FAModal from '@/components/BulkChange2FAModal';
 import SettingsModal from '@/components/SettingsModal';
+import SheetSyncStatusModal from '@/components/SheetSyncStatusModal';
 
 interface MemberActivity {
   name: string;
@@ -56,6 +57,10 @@ export default function HomePage() {
   const [resettingAll, setResettingAll] = useState(false);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [showBulkChange2FA, setShowBulkChange2FA] = useState(false);
+  const [syncingSheet, setSyncingSheet] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [backgroundSyncing, setBackgroundSyncing] = useState(false);
+  const backgroundSyncStarted = useRef(false);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -82,7 +87,31 @@ export default function HomePage() {
     }
   }, []);
 
-  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
+  const backgroundSync = useCallback(async () => {
+    if (backgroundSyncStarted.current) return;
+    backgroundSyncStarted.current = true;
+    setBackgroundSyncing(true);
+    try {
+      const res = await fetch('/api/sync-from-sheet', { method: 'POST' });
+      if (res.body) {
+        const reader = res.body.getReader();
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      }
+      fetchAccounts(true);
+    } catch (e) {
+      console.error('Background sync failed:', e);
+    } finally {
+      setBackgroundSyncing(false);
+    }
+  }, [fetchAccounts]);
+
+  useEffect(() => {
+    fetchAccounts();
+    backgroundSync();
+  }, [fetchAccounts, backgroundSync]);
 
   const handleDelete = async (account: Account) => {
     if (!confirm(`Delete account ${account.email}?`)) return;
@@ -140,6 +169,10 @@ export default function HomePage() {
     } finally {
       setResettingAll(false);
     }
+  };
+
+  const handleSyncFromSheet = () => {
+    setShowSyncModal(true);
   };
 
   const handleExportCSV = async () => {
@@ -245,9 +278,23 @@ export default function HomePage() {
         </div>
 
         <div className="flex gap-2.5 items-center flex-wrap">
+          {backgroundSyncing && (
+            <div className="flex items-center gap-2 text-sm text-slate-300 bg-white/[0.04] py-1.5 px-3 rounded-lg border border-white/10 mr-1 font-medium">
+              <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+              Auto-syncing sheet...
+            </div>
+          )}
           <button className="btn btn-secondary" onClick={() => fetchAccounts(true)} disabled={refreshing} title="Refresh accounts">
             <span className={refreshing ? 'spinning' : ''}>↻</span>
             {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleSyncFromSheet}
+            disabled={syncingSheet}
+            title="Pull accounts from Google Sheet into the database (sheet is source of truth)"
+          >
+            🔄 Sync from Sheet
           </button>
           <button className="btn btn-secondary" onClick={handleExportCSV} disabled={accounts.length === 0} title="Export data to Excel (.xlsx)">
             📥 Export Excel
@@ -512,6 +559,12 @@ export default function HomePage() {
       )}
       {historyTarget && (
         <CheckHistoryModal account={historyTarget} onClose={() => setHistoryTarget(null)} />
+      )}
+      {showSyncModal && (
+        <SheetSyncStatusModal
+          onClose={() => setShowSyncModal(false)}
+          onDone={() => fetchAccounts(true)}
+        />
       )}
 
       {/* Toasts */}

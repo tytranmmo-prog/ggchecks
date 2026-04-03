@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getCheckHistory } from '@/lib/db';
+import { getCheckResultStore } from '@/lib/store';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +15,6 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: 'accountId is required' }, { status: 400 });
   }
 
-  const result = await getCheckHistory({ serviceAccountId: accountId, cursor, limit });
+  const result = await getCheckResultStore().getCheckHistory({ serviceAccountId: accountId, cursor, limit });
   return Response.json(result);
 }

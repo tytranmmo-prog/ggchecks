@@ -8,19 +8,14 @@ import { createLogger } from './pino-logger';
 const log = createLogger('sheets');
 
 const SHEET_NAME = 'Accounts';
-const HEADER_ROW = ['email', 'password', 'totpSecret', 'monthlyCredits', 'additionalCredits', 'additionalCreditsExpiry', 'memberActivities', 'lastChecked', 'status', 'screenshot'];
+const HEADER_ROW = ['email', 'password', 'totpSecret', 'proxy'];
 
 export interface Account {
   rowIndex: number; // 1-based row in sheet (row 1 = header, so data starts at 2)
   email: string;
   password: string;
   totpSecret: string;
-  monthlyCredits?: string;
-  additionalCredits?: string;
-  additionalCreditsExpiry?: string;
-  memberActivities?: string;
-  lastChecked?: string;
-  status?: string;
+  proxy?: string;
 }
 
 function getAuth() {
@@ -69,23 +64,23 @@ export async function getAccounts(): Promise<Account[]> {
       email: row.get('email') || '',
       password: row.get('password') || '',
       totpSecret: row.get('totpSecret') || '',
-      monthlyCredits: row.get('monthlyCredits') || '',
-      additionalCredits: row.get('additionalCredits') || '',
-      additionalCreditsExpiry: row.get('additionalCreditsExpiry') || '',
-      memberActivities: row.get('memberActivities') || '',
-      lastChecked: row.get('lastChecked') || '',
-      status: row.get('status') || '',
+      proxy: row.get('proxy') || '',
     }))
     .filter(a => a.email);
 }
 
-export async function addAccount(account: { email: string; password: string; totpSecret: string }): Promise<void> {
+export async function addAccount(account: {
+  email:      string;
+  password:   string;
+  totpSecret: string;
+  proxy?:     string;
+}): Promise<void> {
   const sheet = await getSheet();
   await sheet.addRow({
-    email: account.email,
-    password: account.password,
+    email:      account.email,
+    password:   account.password,
     totpSecret: account.totpSecret,
-    status: 'pending',
+    proxy:      account.proxy ?? '',
   });
 }
 
@@ -191,6 +186,60 @@ export async function update2FASecret(rowIndex: number, totpSecret: string): Pro
 
   row.set('totpSecret', totpSecret);
   await row.save();
+}
+
+export async function updateProxy(rowIndex: number, proxy: string): Promise<void> {
+  const sheet = await getSheet();
+  const rows = await sheet.getRows();
+  const row = rows[rowIndex - 2];
+  if (!row) throw new Error(`Row ${rowIndex} not found`);
+
+  row.set('proxy', proxy);
+  await row.save();
+}
+
+/**
+ * Backfill the proxy column for multiple sheet rows in a single API call.
+ * Loads only the proxy column for the affected rows, sets values locally,
+ * then flushes everything with one `saveUpdatedCells()` call.
+ *
+ * @param updates  Array of { rowIndex (1-based), proxy } to write.
+ */
+export async function batchUpdateProxy(
+  updates: Array<{ rowIndex: number; proxy: string }>,
+): Promise<void> {
+  if (updates.length === 0) return;
+
+  const sheet = await getSheet();
+
+  // Find the 0-based column index of the 'proxy' column.
+  // The sheet header is in row 0; we need the column letter for loadCells.
+  await sheet.loadHeaderRow();
+  const proxyColIndex = sheet.headerValues.indexOf('proxy');
+  if (proxyColIndex === -1) throw new Error("'proxy' column not found in sheet header");
+
+  // Determine the row range to load (sheet rows are 0-based internally;
+  // rowIndex is 1-based where row 1 = header, so data row n → zero-based n-1).
+  const minRow = Math.min(...updates.map(u => u.rowIndex)) - 1; // inclusive, 0-based
+  const maxRow = Math.max(...updates.map(u => u.rowIndex)) - 1; // inclusive, 0-based
+
+  // Load only the proxy column for the affected rows.
+  await sheet.loadCells({
+    startRowIndex:    minRow,
+    endRowIndex:      maxRow + 1,  // exclusive
+    startColumnIndex: proxyColIndex,
+    endColumnIndex:   proxyColIndex + 1,
+  });
+
+  // Mutate each cell locally — no network call yet.
+  for (const { rowIndex, proxy } of updates) {
+    const cell = sheet.getCell(rowIndex - 1, proxyColIndex);
+    cell.value = proxy;
+  }
+
+  // One API call flushes all dirty cells.
+  await sheet.saveUpdatedCells();
+  log.info('batch proxy backfill done', { count: updates.length });
 }
 
 export async function deleteAccount(rowIndex: number): Promise<void> {

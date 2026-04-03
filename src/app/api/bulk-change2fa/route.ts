@@ -1,7 +1,6 @@
 import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
-import { update2FASecret } from '@/lib/db';
-import { getAccounts as getSheetAccounts, update2FASecret as updateSheetSecret } from '@/lib/sheets';
+import { getAccountStore } from '@/lib/store';
 import { getPool, type PoolType } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
@@ -20,6 +19,7 @@ interface AccountInput {
   email: string;
   password: string;
   totpSecret: string;
+  proxy?: string | null;
 }
 
 // ── runChange2FA ──────────────────────────────────────────────────────────────
@@ -95,15 +95,6 @@ export async function POST(req: NextRequest) {
   const pool = await getPool(poolType);
   rlog.info('pool ready', { type: pool.type, concurrency: pool.concurrency });
 
-  // Fetch sheet accounts once up-front for sheet sync (best-effort)
-  let sheetAccounts: { email: string; rowIndex: number }[] = [];
-  try {
-    sheetAccounts = await getSheetAccounts();
-    rlog.info('sheet accounts loaded', { count: sheetAccounts.length });
-  } catch (e) {
-    rlog.warn('failed to load sheet accounts — sheet sync will be skipped', { err: String(e) });
-  }
-
   const stream = new ReadableStream({
     async start(controller) {
       const send = (data: object) => {
@@ -124,7 +115,7 @@ export async function POST(req: NextRequest) {
         let port: number | undefined;
 
         try {
-          ({ port, release } = await pool.acquire(account.email));
+          ({ port, release } = await pool.acquire(account.email, account.proxy ?? null));
           alog.info('task | slot acquired', { port });
           send({ type: 'account_start', id: account.id, email: account.email, port });
 
@@ -146,19 +137,9 @@ export async function POST(req: NextRequest) {
           if (result.success) {
             const newTotpSecret = String(result.newTotpSecret ?? '');
 
-            // Save to DB
-            await update2FASecret(account.id, newTotpSecret)
-              .catch(e => alog.error('db update failed', { err: String(e) }));
-
-            // Sync to Google Sheet (non-fatal)
-            const sheetRow = sheetAccounts.find(r => r.email === account.email);
-            if (sheetRow) {
-              await updateSheetSecret(sheetRow.rowIndex, newTotpSecret)
-                .then(() => alog.info('sheet synced', { rowIndex: sheetRow.rowIndex }))
-                .catch(e => alog.warn('sheet sync failed (non-fatal)', { err: String(e) }));
-            } else {
-              alog.warn('account not found in sheet — skipping sheet sync');
-            }
+            // HybridAccountStore handles Sheet + DB sync internally
+            await getAccountStore().update2FASecret(account.id, newTotpSecret)
+              .catch(e => alog.error('store update failed', { err: String(e) }));
 
             send({ type: 'account_done', id: account.id, newTotpSecret });
             alog.info('task | done ✓', { newTotpSecret: '***' });

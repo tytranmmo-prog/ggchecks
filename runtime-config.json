@@ -1,23 +1,19 @@
 {
   "BULK_CONCURRENCY": "4",
-
   "OXYLABS_PROXY_HOST": "isp.oxylabs.io",
   "OXYLABS_PROXY_USER": "proxyvip_VV7Fk",
   "OXYLABS_PROXY_PASS": "Lungtung1_23",
   "OXYLABS_BASE_PORT": "8001",
   "OXYLABS_PORT_RANGE": "99",
-
-  "GOOGLE_SHEET_ID": "1Z-kFt4xAVpSylQ4kkF95Zm_v3f3-w2kMSYuC_m7i-ZI",
+  "GOOGLE_SHEET_ID": "16kWf0t_kphZPDE5-ZQ9mZ3JFtZHxTjYuXJXmd-2BoeI",
   "DRIVE_SCREENSHOT_FOLDER_ID": "1ut0LEdsUeMF5Q9E3FXtAs09ZJO2Z0cmY",
-  "GOOGLE_SERVICE_ACCOUNT_EMAIL": "",
+  "GOOGLE_SERVICE_ACCOUNT_EMAIL": "ggchecks@ggchecks-test.iam.gserviceaccount.com",
   "GOOGLE_DELEGATED_SUBJECT": "",
-
   "CHROME_PATH": "",
   "GPM_BASE_URL": "http://127.0.0.1:9495",
   "BULK_BASE_PORT": "9300",
   "BULK_BASE_PROXY_PORT": "10100",
   "BULK_PROFILE_DIR": "/tmp/ggchecks-profiles",
-
   "CHECKER_PATH": "./checkOne.ts",
   "CHANGE2FA_PATH": "./change2fa.ts"
 }

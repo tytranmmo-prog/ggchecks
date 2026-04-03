@@ -117,7 +117,8 @@ export class PersistentChromePool implements BrowserPool {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  acquire(email: string): Promise<BrowserHandle> {
+  // proxy ignored — PersistentChromePool manages its own proxy configuration
+  acquire(email: string, _proxy?: string | null): Promise<BrowserHandle> {
     const alog = log.child({ email });
     alog.info('acquire | waiting for free slot');
     return new Promise(resolve => {

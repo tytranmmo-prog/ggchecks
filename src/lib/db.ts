@@ -215,6 +215,7 @@ export async function addAccount(account: {
   email:      string;
   password:   string;
   totpSecret: string;
+  proxy?:     string;
 }): Promise<void> {
   await ensureSchema();
   const db = getDb();
@@ -222,6 +223,7 @@ export async function addAccount(account: {
     email:      account.email,
     password:   account.password,
     totpSecret: account.totpSecret,
+    ...(account.proxy ? { proxy: account.proxy } : {}),
   });
   log.info('account added', { email: account.email });
 }

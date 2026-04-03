@@ -46,6 +46,8 @@ export class GpmProfilePool implements BrowserPool {
   private readonly config: PoolConfig;
   private readonly gpm: GpmLoginClient;
   private readonly limit: ReturnType<typeof pLimit>;
+  private readonly onProxyAssigned?: (email: string, proxy: string) => Promise<void>;
+  private readonly onProxyChanged?:  (email: string, proxy: string) => Promise<void>;
 
   /**
    * Cache: profile name → GPM Profile object.
@@ -63,11 +65,17 @@ export class GpmProfilePool implements BrowserPool {
    */
   private latestChromiumVersion: string | null | undefined = null;
 
-  constructor(config: PoolConfig) {
+  constructor(
+    config: PoolConfig,
+    onProxyAssigned?: (email: string, proxy: string) => Promise<void>,
+    onProxyChanged?:  (email: string, proxy: string) => Promise<void>,
+  ) {
     this.config = config;
     this.concurrency = config.concurrency;
     this.limit = pLimit(this.concurrency);
     this.gpm = new GpmLoginClient(config.gpmBaseUrl);
+    this.onProxyAssigned = onProxyAssigned;
+    this.onProxyChanged  = onProxyChanged;
     log.info('Initialised', {
       concurrency: config.concurrency,
       gpmBaseUrl: config.gpmBaseUrl,
@@ -199,7 +207,7 @@ export class GpmProfilePool implements BrowserPool {
 
   // ── acquire ───────────────────────────────────────────────────────────────
 
-  acquire(email: string): Promise<BrowserHandle> {
+  acquire(email: string, proxy?: string | null): Promise<BrowserHandle> {
     // Bind email to every log call within this acquire() scope.
     const alog = log.child({ email });
     alog.info('acquire | queued', {
@@ -224,26 +232,68 @@ export class GpmProfilePool implements BrowserPool {
 
       try {
         slotIndex = this.nextFreeSlot();
-        const cdpPort   = this.config.baseCdpPort + slotIndex;
+        const cdpPort = this.config.baseCdpPort + slotIndex;
 
-        // Each email gets a fixed proxy port derived from a random seed stored
-        // permanently per profile. The port is chosen once (at profile creation)
-        // and never changed afterwards.
-        const proxyPort    = proxyPortForEmail(email, this.config);
-        const proxyRaw     = buildGpmProxy(this.config, proxyPort);
-        alog.debug('acquire | slot assigned', { slotIndex, cdpPort, proxyPort });
+        // ── Resolve which proxy to use ──────────────────────────────────────
+        // If the caller supplied a proxy (from DB), use it directly.
+        // Otherwise fall back to the deterministic hash-based generation.
+        let proxyRaw: string;
+        if (proxy) {
+          proxyRaw = proxy;
+          alog.debug('acquire | using caller-supplied proxy', { proxy: proxyRaw });
+        } else {
+          const proxyPort = proxyPortForEmail(email, this.config);
+          proxyRaw       = buildGpmProxy(this.config, proxyPort);
+          alog.debug('acquire | using generated proxy', { slotIndex, cdpPort, proxyPort });
 
-        // Save assigned proxy back to the database
-        try {
-          const { updateAccountProxy } = await import('./db');
-          await updateAccountProxy(email, proxyRaw);
-        } catch (dbErr) {
-          alog.warn('acquire | failed to save proxy to db', { err: String(dbErr) });
+          // Persist newly-generated proxy back to the store.
+          try {
+            await this.onProxyAssigned?.(email, proxyRaw);
+          } catch (dbErr) {
+            alog.warn('acquire | failed to save generated proxy', { err: String(dbErr) });
+          }
         }
 
-        // resolveProfileId creates the profile with proxyRaw if it doesn't exist.
-        // For existing profiles the proxy is left untouched — it was set at creation.
-        profileId = await this.resolveProfileId(email, proxyRaw);
+        // ── Find/create GPM profile, sync proxy if it changed ───────────────
+        const profileName = `${PROFILE_PREFIX}${email}`;
+        const existing    = await this.findProfileByName(profileName);
+
+        if (existing) {
+          profileId = existing.id;
+          const gpmProxy   = existing.raw_proxy ?? '';
+          const wantProxy  = proxyRaw ?? '';
+
+          if (gpmProxy !== wantProxy) {
+            alog.info('acquire | proxy changed — updating GPM profile', {
+              profileId,
+              old: gpmProxy || '(none)',
+              new: wantProxy || '(none)',
+            });
+            try {
+              await this.gpm.profiles.update(profileId, { raw_proxy: wantProxy });
+              // Invalidate cache so next acquire() re-reads the updated proxy.
+              this.profileCache.delete(profileName);
+              alog.info('acquire | GPM profile proxy updated', { profileId });
+
+              // Persist the change to DB (and sheet via HybridStore).
+              if (wantProxy) {
+                try {
+                  await this.onProxyChanged?.(email, wantProxy);
+                } catch (cbErr) {
+                  alog.warn('acquire | onProxyChanged callback failed (non-fatal)', { err: String(cbErr) });
+                }
+              }
+            } catch (updateErr) {
+              alog.warn('acquire | GPM proxy update failed (non-fatal)', { err: String(updateErr) });
+            }
+          } else {
+            alog.debug('acquire | proxy unchanged', { profileId });
+          }
+        } else {
+          // Profile doesn't exist yet — resolveProfileId will create it.
+          alog.info('acquire | no profile — will create via resolveProfileId');
+          profileId = await this.resolveProfileId(email, proxyRaw);
+        }
 
         alog.info('acquire | calling GPM start', { profileId, cdpPort });
         const startRes = await this.gpm.profiles.start(profileId, {

@@ -1,7 +1,7 @@
 import { exec }        from 'child_process';
 import { NextRequest } from 'next/server';
-import { updateCreditResult } from '@/lib/db';
-import type { MemberActivity } from '@/lib/db';
+import { getCheckResultStore } from '@/lib/store';
+import type { MemberActivity } from '@/lib/store';
 import { getPool, type PoolType } from '@/lib/browser-pool';
 import { getAllConfigs, getConfig } from '@/lib/config';
 import { createLogger } from '@/lib/pino-logger';
@@ -22,6 +22,7 @@ interface AccountInput {
   email: string;
   password: string;
   totpSecret: string;
+  proxy?: string | null;
 }
 
 // ── runCheck ──────────────────────────────────────────────────────────────────
@@ -107,7 +108,7 @@ export async function POST(req: NextRequest) {
         let port: number | undefined;
 
         try {
-          ({ port, release } = await pool.acquire(account.email));
+          ({ port, release } = await pool.acquire(account.email, account.proxy ?? null));
           alog.info('account task | slot acquired', { port });
           send({ type: 'account_start', id: account.id, email: account.email, port });
           send({ type: 'chrome_ready', port });
@@ -124,7 +125,7 @@ export async function POST(req: NextRequest) {
           if (result.success) {
             const memberActivities = (result.memberActivities ?? []) as MemberActivity[];
 
-            await updateCreditResult(account.id, {
+            await getCheckResultStore().updateCreditResult(account.id, {
               monthlyCredits:          String(result.monthlyCredits          ?? ''),
               additionalCredits:       String(result.additionalCredits       ?? ''),
               additionalCreditsExpiry: String(result.additionalCreditsExpiry ?? ''),
@@ -161,7 +162,7 @@ export async function POST(req: NextRequest) {
 
           send({ type: 'account_error', id: account.id, error: msg, screenshotUrl });
 
-          await updateCreditResult(account.id, {
+          await getCheckResultStore().updateCreditResult(account.id, {
             monthlyCredits: '', additionalCredits: '', additionalCreditsExpiry: '',
             memberActivities: [], lastChecked: new Date().toISOString(),
             status: `error: ${msg.slice(0, 100)}`,
