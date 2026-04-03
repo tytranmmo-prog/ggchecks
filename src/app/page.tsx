@@ -110,8 +110,7 @@ export default function HomePage() {
 
   useEffect(() => {
     fetchAccounts();
-    backgroundSync();
-  }, [fetchAccounts, backgroundSync]);
+  }, [fetchAccounts]);
 
   const handleDelete = async (account: Account) => {
     if (!confirm(`Delete account ${account.email}?`)) return;
