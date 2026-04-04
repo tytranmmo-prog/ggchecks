@@ -9,6 +9,7 @@ import BulkCheckModal from '@/components/BulkCheckModal';
 import BulkChange2FAModal from '@/components/BulkChange2FAModal';
 import SettingsModal from '@/components/SettingsModal';
 import SheetSyncStatusModal from '@/components/SheetSyncStatusModal';
+import ClosePaymentsModal from '@/components/ClosePaymentsModal';
 
 interface MemberActivity {
   name: string;
@@ -45,6 +46,7 @@ export default function HomePage() {
 
   const [checkTarget, setCheckTarget] = useState<Account | null>(null);
   const [twoFATarget, setTwoFATarget] = useState<Account | null>(null);
+  const [closePaymentsTarget, setClosePaymentsTarget] = useState<Account | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkCheck, setShowBulkCheck] = useState(false);
   const [showBulkCheckFailed, setShowBulkCheckFailed] = useState(false);
@@ -494,6 +496,7 @@ export default function HomePage() {
                         <button className="btn btn-success" onClick={() => setCheckTarget(account)} title="Check credits">⚡ Check</button>
                         <button className="btn btn-secondary" onClick={() => setHistoryTarget(account)} title="View check history">📋 History</button>
                         <button className="btn btn-warning" onClick={() => setTwoFATarget(account)} title="Change 2FA secret">🔐 2FA</button>
+                        <button className="btn btn-danger" onClick={() => setClosePaymentsTarget(account)} title="Close payments profile">💳 Close Payments</button>
                         <button
                           className="btn btn-secondary btn-icon"
                           onClick={() => handleResetProfile(account)}
@@ -526,6 +529,9 @@ export default function HomePage() {
       )}
       {twoFATarget && (
         <Change2FAModal account={twoFATarget} onClose={() => setTwoFATarget(null)} onSaved={() => fetchAccounts(true)} showToast={showToast} />
+      )}
+      {closePaymentsTarget && (
+        <ClosePaymentsModal account={closePaymentsTarget} onClose={() => setClosePaymentsTarget(null)} onSaved={() => fetchAccounts(true)} showToast={showToast} />
       )}
       {showAddModal && (
         <AddAccountModal onClose={() => setShowAddModal(false)} onSaved={() => fetchAccounts(true)} />
